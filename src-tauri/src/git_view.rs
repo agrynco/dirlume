@@ -7,6 +7,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+pub(crate) mod branches;
+pub(crate) mod comparison;
 pub(crate) mod writes;
 
 #[derive(Debug, Serialize)]
@@ -32,6 +34,13 @@ pub struct Repository {
     head_ref: Option<String>,
     head: Option<String>,
     branches: Vec<Branch>,
+    tags: Vec<Tag>,
+}
+
+#[derive(Serialize)]
+struct Tag {
+    reference: String,
+    name: String,
 }
 
 #[derive(Serialize)]
@@ -296,35 +305,75 @@ fn repository(git: &Path, path: &Path) -> Result<Repository> {
         .and_then(|name| name.to_str())
         .unwrap_or(&root)
         .to_owned();
+    let tags = bounded(
+        git,
+        path,
+        &[
+            "for-each-ref",
+            "--sort=refname",
+            "--format=%(refname)",
+            "refs/tags/",
+        ],
+        STATUS_LIMIT,
+    )?
+    .ok_or(GitError::Unreadable)?;
+    let tags = String::from_utf8_lossy(&tags)
+        .lines()
+        .filter_map(|reference| {
+            Some(Tag {
+                reference: reference.into(),
+                name: reference.strip_prefix("refs/tags/")?.into(),
+            })
+        })
+        .collect();
     Ok(Repository {
         root,
         name,
         head_ref,
         head,
         branches,
+        tags,
     })
 }
 
 fn history(git: &Path, path: &Path, tip: &str, offset: u32) -> Result<History> {
-    let tip = oid(tip)?;
-    let data = success(run(
-        git,
-        path,
-        &[
-            "log",
-            "-z",
-            "--date-order",
-            "--no-color",
-            "--no-decorate",
-            "--no-notes",
-            "--no-show-signature",
-            "--format=%H%x00%h%x00%an%x00%aI%x00%s",
-            &format!("--skip={offset}"),
-            &format!("--max-count={}", PAGE_SIZE + 1),
-            tip,
-            "--",
-        ],
-    )?)?;
+    history_range(git, path, oid(tip)?, offset)
+}
+
+fn history_range(git: &Path, path: &Path, range: &str, offset: u32) -> Result<History> {
+    history_of(git, path, range, offset, None)
+}
+
+fn history_of(
+    git: &Path,
+    path: &Path,
+    range: &str,
+    offset: u32,
+    file: Option<&str>,
+) -> Result<History> {
+    let skip = format!("--skip={offset}");
+    let limit = format!("--max-count={}", PAGE_SIZE + 1);
+    let mut args = vec![
+        "--literal-pathspecs",
+        "log",
+        "-z",
+        "--date-order",
+        "--no-color",
+        "--no-decorate",
+        "--no-notes",
+        "--no-show-signature",
+        "--format=%H%x00%h%x00%an%x00%aI%x00%s",
+        &skip,
+        &limit,
+    ];
+    if file.is_some() {
+        args.push("--follow");
+    }
+    args.extend([range, "--"]);
+    if let Some(file) = file {
+        args.push(file);
+    }
+    let data = success(run(git, path, &args)?)?;
     let data = String::from_utf8_lossy(&data);
     let mut fields: Vec<_> = data.split('\0').collect();
     if fields.last() == Some(&"") {
@@ -351,6 +400,51 @@ fn history(git: &Path, path: &Path, tip: &str, offset: u32) -> Result<History> {
         commits,
         next_offset,
     })
+}
+
+fn blame(git: &Path, root: &Path, tip: &str, path: &str) -> Result<String> {
+    let tip = oid(tip)?;
+    relative_file(path)?;
+    let lines = bounded(
+        git,
+        root,
+        &[
+            "-c",
+            "blame.showEmail=false",
+            "-c",
+            "blame.coloring=none",
+            "blame",
+            "--abbrev=12",
+            "--date=short",
+            tip,
+            "--",
+            path,
+        ],
+        PATCH_LIMIT,
+    )?
+    .ok_or(GitError::Unreadable)?;
+    Ok(String::from_utf8_lossy(&lines).into_owned())
+}
+
+fn commit_graph(git: &Path, root: &Path, tip: &str, search: &str) -> Result<String> {
+    let tip = oid(tip)?;
+    let mut args = vec![
+        "log",
+        "--graph",
+        "--topo-order",
+        "--no-color",
+        "--no-notes",
+        "--no-show-signature",
+        "--max-count=250",
+        "--format=%h %s",
+    ];
+    let grep = format!("--grep={search}");
+    if !search.is_empty() {
+        args.extend(["--fixed-strings", "--regexp-ignore-case", &grep]);
+    }
+    args.extend([tip, "--"]);
+    let text = bounded(git, root, &args, PATCH_LIMIT)?.ok_or(GitError::Unreadable)?;
+    Ok(String::from_utf8_lossy(&text).into_owned())
 }
 
 fn details(git: &Path, path: &Path, hash: &str) -> Result<Details> {
@@ -391,8 +485,16 @@ fn details(git: &Path, path: &Path, hash: &str) -> Result<Details> {
         "--root"
     });
     args.extend([hash, "--"]);
-    let changed = success(run(git, path, &args)?)?;
-    let changed = String::from_utf8_lossy(&changed);
+    let changes = parse_changes(&success(run(git, path, &args)?)?)?;
+    Ok(Details {
+        message: message.trim_end_matches('\n').into(),
+        merge,
+        changes,
+    })
+}
+
+fn parse_changes(changed: &[u8]) -> Result<Vec<Change>> {
+    let changed = String::from_utf8_lossy(changed);
     let mut fields = changed.split_terminator('\0');
     let mut changes = Vec::new();
     while let Some(status) = fields.next() {
@@ -412,11 +514,7 @@ fn details(git: &Path, path: &Path, hash: &str) -> Result<Details> {
             previous_path,
         });
     }
-    Ok(Details {
-        message: message.trim_end_matches('\n').into(),
-        merge,
-        changes,
-    })
+    Ok(changes)
 }
 
 async fn query<T: Send + 'static>(
@@ -658,6 +756,36 @@ pub async fn git_history(root: String, tip: String, offset: u32) -> Result<Histo
 }
 
 #[tauri::command]
+pub async fn git_commit_graph(root: String, tip: String, search: String) -> Result<String> {
+    query(move || commit_graph(&executable()?, directory(&root)?, &tip, search.trim())).await
+}
+
+#[tauri::command]
+pub async fn git_file_history(
+    root: String,
+    tip: String,
+    path: String,
+    offset: u32,
+) -> Result<History> {
+    query(move || {
+        relative_file(&path)?;
+        history_of(
+            &executable()?,
+            directory(&root)?,
+            oid(&tip)?,
+            offset,
+            Some(&path),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_file_blame(root: String, tip: String, path: String) -> Result<String> {
+    query(move || blame(&executable()?, directory(&root)?, &tip, &path)).await
+}
+
+#[tauri::command]
 pub async fn git_details(root: String, hash: String) -> Result<Details> {
     query(move || details(&executable()?, directory(&root)?, &hash)).await
 }
@@ -666,7 +794,7 @@ pub async fn git_details(root: String, hash: String) -> Result<Details> {
 mod tests {
     use super::*;
 
-    fn git(repo: &Path, args: &[&str]) -> String {
+    pub(super) fn git(repo: &Path, args: &[&str]) -> String {
         let output = run(&executable().unwrap(), repo, args).unwrap();
         assert!(
             output.status.success(),

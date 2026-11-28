@@ -80,7 +80,7 @@ function writeFailure(error: unknown) {
   return (error instanceof Error ? error.cause : error) as { kind?: string; detail?: string } | null;
 }
 
-function writeError(error: unknown) {
+export function writeError(error: unknown) {
   const failure = writeFailure(error);
   const message = failure?.kind ? writeErrors[failure.kind] : undefined;
   return message ? t(message) : failure?.detail || t("Git could not complete the operation.");
