@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) mod branches;
 pub(crate) mod comparison;
+pub(crate) mod file;
 pub(crate) mod graph;
 pub(crate) mod history_edits;
 pub(crate) mod merge;
@@ -742,26 +743,6 @@ pub async fn git_repository(path: String) -> Result<Repository> {
 #[tauri::command]
 pub async fn git_history(root: String, tip: String, offset: u32) -> Result<History> {
     query(move || history(&executable()?, directory(&root)?, &tip, offset)).await
-}
-
-#[tauri::command]
-pub async fn git_file_history(
-    root: String,
-    tip: String,
-    path: String,
-    offset: u32,
-) -> Result<History> {
-    query(move || {
-        relative_file(&path)?;
-        history_of(
-            &executable()?,
-            directory(&root)?,
-            oid(&tip)?,
-            offset,
-            Some(&path),
-        )
-    })
-    .await
 }
 
 #[tauri::command]

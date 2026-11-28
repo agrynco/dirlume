@@ -1126,6 +1126,28 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-graph-more-parents { grid-column: 3; align-self: center; }
 .git-graph-row > code { grid-column: 4; align-self: center; color: var(--panel-muted); }
 .git-graph-footer { flex: none; padding: 3px 8px; border-block-start: 1px solid var(--line); }
+.git-file-history { padding: 8px; border-block-end: 1px solid var(--line); }
+.git-file-history .git-branch-actions { padding-inline: 0; }
+.git-file-history-target { display: grid; gap: 3px; margin: 3px 0 0; overflow-wrap: anywhere; }
+.git-file-history-target > span { color: var(--panel-muted); }
+.git-file-commits button {
+  display: flex; justify-content: space-between; width: 100%; border-radius: 0; text-align: start;
+  border-block-end: 1px solid var(--line);
+}
+.git-file-commits button strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.git-file-commits button[aria-selected="true"] { background: var(--panel-selection); color: var(--panel-selected-ink); }
+.git-file-commits button:focus-visible { outline-offset: -2px; }
+.git-file-versions { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.git-file-version-headings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-block-end: 1px solid var(--line); }
+.git-file-version-heading { display: grid; gap: 4px; align-content: start; padding: 6px 8px; overflow-wrap: anywhere; }
+.git-file-version-heading + .git-file-version-heading { border-inline-start: 1px solid var(--line); }
+.git-file-version-heading small, .git-file-version-heading code { color: var(--panel-muted); }
+.git-file-feedback { margin: 8px; overflow-wrap: anywhere; }
+.git-file-rows {
+  --comparison-columns: minmax(0, 1fr) 0px minmax(0, 1fr);
+  flex: 1; min-height: 0; overflow: auto; color: var(--compare-ink); background: var(--compare-bg);
+  font: var(--compare-size)/1.5 var(--compare-font);
+}
 .environment-pane { overflow: hidden; }
 .environment-pane .pane-title { flex: 1; }
 .environment-pane .pane-title svg { width: 15px; height: 15px; flex: none; }
