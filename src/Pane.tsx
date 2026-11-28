@@ -16,7 +16,7 @@ import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
 import { bindingMatches, eventShortcut, showShortcut, type PanelLayout } from "./preferences";
 import { useTimestamps } from "./useTimestamps";
 import { viewFontStyle } from "./viewFonts";
-import { columnGroupTrack, fieldClass, FileColumns, panelColumnTracks, readColumnLayout, saveColumnLayout, type ColumnSamples } from "./FileColumns";
+import { columnGroupTrack, fieldClass, FileColumns, isSizeField, panelColumnTracks, readColumnLayout, saveColumnLayout, type ColumnSamples } from "./FileColumns";
 import { defaultPanelModes, displayPanelName, isNameField, panelColumnGroups, type PanelField, type PanelMode, type PanelModeId } from "./panelModes";
 import { usePanelMetadata } from "./usePanelMetadata";
 import { QuickSearch, useQuickSearch } from "./QuickSearch";
@@ -190,16 +190,9 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     (folderSizes.active || folderSizes.branchActive) && !group.some(({ field }) => field === "size" || field === "bytes")
       ? [...group, { field: "size" as const, width: "0" }] : group);
   const columns = groups.flat();
-  const hasReadyBackgroundSize = useMemo(() => {
-    for (const size of pane.backgroundSizes?.values() ?? []) {
-      if (!size.pending && !size.unavailable) return true;
-    }
-    return false;
-  }, [pane.backgroundSizes]);
-  const fitMeasuredFolders = !pane.search && (pane.sizes.size > 0 || hasReadyBackgroundSize);
   const tlsProfiles = netbox && pane.entries.some(({ connection }) =>
     connection?.kind === "ftp" && connection.encryption && connection.encryption !== "plain");
-  const tracks = driveCatalog ? "minmax(0, 2fr) minmax(0, 3fr) minmax(0, 2fr)" : netbox ? `minmax(0, 2fr) minmax(0, ${tlsProfiles ? 15 : 7}ch) minmax(0, 3fr)` : panelColumnTracks(columns, fitMeasuredFolders);
+  const tracks = driveCatalog ? "minmax(0, 2fr) minmax(0, 3fr) minmax(0, 2fr)" : netbox ? `minmax(0, 2fr) minmax(0, ${tlsProfiles ? 15 : 7}ch) minmax(0, 3fr)` : panelColumnTracks(columns);
   const rowProbe = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
   const selected = paneCursorIndex(pane, entries);
@@ -232,32 +225,9 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const displayedFields = displayedColumns.map(({ field }) => field);
   const autoNameCount = columns.filter(({ field, width }) => width === "0" && isNameField(field)).length;
   const automaticFields = [...new Set(columns.filter(({ field, width }) =>
-    width === "0" && (!isNameField(field) || autoNameCount > 1)).map(({ field }) => field))].join(",");
-  const sampleSize = fitMeasuredFolders && columns.some(({ field }) => field === "size");
-  const sampleBytes = fitMeasuredFolders && columns.some(({ field }) => field === "bytes");
+    isSizeField(field) || width === "0" && (!isNameField(field) || autoNameCount > 1)).map(({ field }) => field))].join(",");
   const language = locale();
   const bytesFormat = useMemo(() => new Intl.NumberFormat(language), [language]);
-  const measuredSizes = useMemo(() => {
-    const size = new Map<string, string>();
-    const bytes = new Map<string, string>();
-    if (sampleSize || sampleBytes) {
-      const measurements = pane.backgroundSizes ? new Map([...pane.sizes, ...pane.backgroundSizes]) : pane.sizes;
-      for (const [name, result] of measurements) {
-        const background = pane.backgroundSizes?.get(name);
-        if (background?.unavailable || (background?.pending && background.bytes === 0)) continue;
-        // The pane uses tabular figures. One sample per digit pattern keeps large batches compact.
-        if (sampleSize) {
-          const sample = sizeLabel(result.bytes, result.incomplete);
-          size.set(sample.replace(/\p{Decimal_Number}/gu, "0"), sample);
-        }
-        if (sampleBytes) {
-          const sample = sizeLabel(result.bytes, result.incomplete, bytesFormat);
-          bytes.set(sample.replace(/\p{Decimal_Number}/gu, "0"), sample);
-        }
-      }
-    }
-    return { size: [...size.values()], bytes: [...bytes.values()] };
-  }, [sampleSize, sampleBytes, pane.backgroundSizes, pane.sizes, bytesFormat]);
   const visibleTimestamps = processView ? [] : indices.map((index) => entries[index].modified);
   const dateLabel = useTimestamps(displayedFields.includes("date") ? visibleTimestamps : [], "date");
   const timeLabel = useTimestamps(displayedFields.includes("time") ? visibleTimestamps : [], "time");
@@ -433,22 +403,21 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   }
 
   const widthSamples = useMemo<ColumnSamples>(() => {
-    const result: ColumnSamples = { ...measuredSizes };
+    const result: ColumnSamples = {};
     if (processView || netbox || !automaticFields) return result;
     for (const field of automaticFields.split(",") as PanelField[]) {
       const samples = new Map<string, string>();
       const tabular = field !== "owner" && !isNameField(field);
       const add = (label: string) => samples.set(tabular ? label.replace(/\p{Decimal_Number}/gu, "0") : label, label);
-      for (const sample of result[field] ?? []) add(sample);
       for (const entry of entries) add(itemValue(entry, field, true));
       result[field] = [...samples.values()];
     }
     return result;
-  }, [automaticFields, entries, measuredSizes, processView, netbox, metadata, pane, language, dateLabel, timeLabel, definition, listOwner, listLinks]);
+  }, [automaticFields, entries, processView, netbox, metadata, pane, language, dateLabel, timeLabel, definition, listOwner, listLinks]);
   const statusSamples: ColumnSamples = {};
   if (!processView && !netbox && current && current.name !== "..") {
     for (const { field, width } of statusColumns) {
-      if (width === "0") statusSamples[field] = [itemValue(current, field)];
+      if (width === "0" || isSizeField(field)) statusSamples[field] = [itemValue(current, field)];
     }
   }
 
@@ -762,7 +731,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
               <Button type="button" className="icon-button" aria-label={t("Cancel folder size calculation")}
                 shortcut={cancelKey} onClick={onCancelFolderOperation}><X aria-hidden="true" /></Button>
             </div> : current && current.name !== ".." && statusColumns.length > 0 &&
-              <div className="pane-details" style={{ gridTemplateColumns: panelColumnTracks(statusColumns, false, true) }}
+              <div className="pane-details" style={{ gridTemplateColumns: panelColumnTracks(statusColumns, true) }}
                 data-tooltip={statusColumns.map(({ field }) => itemValue(current, field)).filter(Boolean).join(" · ")}>
                 {statusColumns.map(({ field }, index) => <span key={index} className={`pane-detail pane-detail-${fieldClass[field]}`}
                   data-tooltip={itemValue(current, field)}>

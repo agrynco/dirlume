@@ -63,7 +63,6 @@ try {
     const row = (pane, index = 0) => pane.locator(`.file-row[data-tooltip="file-${String(index).padStart(3, "0")}.txt"]`);
     const size = (pane, index) => row(pane, index).locator(".file-size").first();
     const width = (locator) => locator.evaluate((element) => element.getBoundingClientRect().width);
-    const fits = (locator) => locator.evaluate((element) => element.scrollWidth <= element.clientWidth);
     const assertFits = async (locator) => {
       const element = await locator.elementHandle();
       try {
@@ -113,7 +112,15 @@ try {
     for (const widthSetting of ["2", "3%"]) {
       await page.goto(`http://dirlume.test/?width=${encodeURIComponent(widthSetting)}`);
       await size(left).waitFor();
-      assert.equal(await fits(size(left)), false, "An explicit narrow width was expanded.");
+      await assertFits(size(left));
+      const beforeNarrow = await width(size(left));
+      await page.setViewportSize({ width: 520, height: 640 });
+      await left.locator("#left-files").press("End");
+      await assertFits(size(left, 159));
+      await assertFits(left.locator(".col-size button span"));
+      assert.ok(await width(size(left, 159)) <= beforeNarrow + 1);
+      assert.ok(Math.abs(await width(left.locator(".col-size")) - await width(size(left, 159))) <= 1);
+      await page.setViewportSize({ width: 1940, height: 640 });
     }
 
     await page.goto("http://dirlume.test/?advanced");
