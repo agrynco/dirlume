@@ -645,7 +645,8 @@ export interface GitHunkPlan { review: GitHunkReview; hunks: string[] }
 export interface GitDiscardReview { expected: GitIndexSnapshot; change: GitWorkingChange; stamps: unknown[] }
 export interface GitDiscardPlan { review: GitDiscardReview; diff: GitWorkingDiff }
 export interface GitStashEntry { hash: string; position: number; subject: string }
-export interface GitStashPreview { combined: GitRevisionDiff; staged: GitRevisionDiff; working: GitRevisionDiff }
+export interface GitStashChange { base: string | null; target: string; change: GitDetails["changes"][number] }
+export interface GitStashPreview { combined: GitStashChange[]; staged: GitStashChange[]; working: GitStashChange[] }
 export type GitStashAction = "apply" | "pop" | "drop";
 export interface GitStashResult { changes: GitWorkingChange[]; error: string | null }
 export interface GitWorkingDiff {

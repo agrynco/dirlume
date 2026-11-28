@@ -1039,14 +1039,13 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-history-impact { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 12px; margin: 0; }
 .git-history-impact dd { margin: 0; overflow-wrap: anywhere; }
 .git-history-impact dt { color: var(--panel-muted); }
-.git-history-source, .git-history-patch-versions { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.git-history-source { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
 .git-history-source code { overflow-wrap: anywhere; }
 .git-revision-comparison .git-history-paths, .git-history-paths { list-style: none; padding: 0; margin: 0; }
 .git-history-paths button { width: 100%; justify-content: flex-start; text-align: start; overflow-wrap: anywhere; }
 .git-history-paths button svg { flex: none; }
 .git-history-paths button[aria-pressed="true"] { background: var(--panel-selection); color: var(--panel-selected-ink); }
 .git-history-patch { min-width: 0; }
-.git-history-patch-versions { margin-block: 6px; color: var(--panel-muted); }
 .git-history-patch .git-patch { background: var(--panel-bg); border: 1px solid var(--line); max-block-size: 20rem; }
 .git-history-confirmation { display: grid; align-content: start; gap: 10px; }
 .git-history-confirmation h3 { margin: 0; font-size: 1em; }

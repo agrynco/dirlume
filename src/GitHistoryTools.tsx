@@ -7,7 +7,8 @@ import {
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { GitActionButtons, useGitMenu, type GitAction } from "./GitActions";
-import { GitRevisionPatch } from "./GitRevisionComparison";
+import { GitRevisionChange } from "./GitRevisionComparison";
+import type { ComparisonShortcuts } from "./TextTools";
 import { writeError } from "./gitWriteError";
 import { t } from "./i18n";
 
@@ -34,8 +35,9 @@ function CommitHash({ hash }: { hash: string }) {
   return <code title={hash}>{hash.slice(0, 12)}</code>;
 }
 
-function Impact({ root, plan, selectedPath, onSelectPath }: {
+function Impact({ root, plan, selectedPath, onSelectPath, shortcuts }: {
   root: string; plan: GitHistoryPlan; selectedPath: string | undefined; onSelectPath: (path: string) => void;
+  shortcuts: ComparisonShortcuts;
 }) {
   const { action, target, head, headRef, parent } = plan.review;
   const effect = resetEffects[action];
@@ -74,12 +76,8 @@ function Impact({ root, plan, selectedPath, onSelectPath }: {
     })}</ul> : <p>{t("No changed paths.")}</p>}
     {replay && change && <section className="git-history-patch" aria-label={t("Change preview")}>
       <h3>{t(revert ? "Inverse of the source commit" : "Source commit changes")}</h3>
-      <div className="git-history-patch-versions">
-        <span>{t("Before")} {revert ? <CommitHash hash={target} /> : parentLabel}</span>
-        <span>{t("After")} {revert ? parentLabel : <CommitHash hash={target} />}</span>
-      </div>
-      <GitRevisionPatch key={JSON.stringify([base, target, change.path, revert])} root={root} base={base} target={target}
-        change={change} reverse={revert} />
+      <GitRevisionChange key={JSON.stringify([base, target, change.path, revert])} root={root} base={base} target={target}
+        change={change} reverse={revert} shortcuts={shortcuts} />
     </section>}
     {local.length > 0 && <>
       <h3>{t("Local changes")}</h3>
@@ -110,8 +108,9 @@ function PushImpact({ review }: { review: GitPushReview }) {
   </>;
 }
 
-export function GitHistoryTools({ repository, initialTarget, initialRef, initialAction, onRefresh }: {
+export function GitHistoryTools({ repository, initialTarget, initialRef, initialAction, onRefresh, shortcuts }: {
   repository: GitRepository; initialTarget?: string; initialRef?: string; initialAction?: Action; onRefresh: () => void;
+  shortcuts: ComparisonShortcuts;
 }) {
   const menu = useGitMenu();
   const root = repository.root;
@@ -286,7 +285,7 @@ export function GitHistoryTools({ repository, initialTarget, initialRef, initial
           {preview.value.parents.map((hash, index) => <option key={hash} value={index + 1}>{index + 1} · {hash.slice(0, 12)}</option>)}
         </select>
       </label>}
-      {!mustChooseParent && <Impact root={root} plan={preview.value} selectedPath={selectedPath} onSelectPath={setSelectedPath} />}
+      {!mustChooseParent && <Impact root={root} plan={preview.value} selectedPath={selectedPath} onSelectPath={setSelectedPath} shortcuts={shortcuts} />}
     </>}
     {preview?.kind === "push" && <PushImpact review={preview.value} />}
     {preview?.kind === "rebase" && <>
@@ -346,7 +345,7 @@ export function GitHistoryTools({ repository, initialTarget, initialRef, initial
               onChange={(event) => setConfirmation({ ...confirmation, branch: event.target.value })} />
           </label>
         </> : confirmation.kind === "push" ? <PushImpact review={confirmation.value} />
-          : confirmation.kind === "edit" ? <Impact root={root} plan={confirmation.value} selectedPath={selectedPath} onSelectPath={setSelectedPath} /> : <>
+          : confirmation.kind === "edit" ? <Impact root={root} plan={confirmation.value} selectedPath={selectedPath} onSelectPath={setSelectedPath} shortcuts={shortcuts} /> : <>
             <RebaseImpact plan={confirmation.value} />
             <h3>{t("Commit sequence")}</h3>
             {confirmation.steps?.length ? <ol>{confirmation.steps.map((step) =>

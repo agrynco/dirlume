@@ -95,19 +95,6 @@ try {
               targetOnly: { commits: [commit("c", "Target-only commit")], nextOffset: null },
               changes: [{ status: "M", path: "compare.txt", previousPath: null }],
             };
-          case "git_revision_diff":
-            assertRoot(args.root);
-            if (args.path === "review-new.txt" && args.previousPath === "review-old.txt" && args.target === hash("a") &&
-              args.base === hash("b") && !args.reverse) return { patch: "-original review\n+forward review\n", fallback: null };
-            if (args.path === "merge-review.txt" && args.target === hash("a") && args.reverse && [hash("b"), hash("c")].includes(args.base)) {
-              return { patch: "-merge result\n+mainline " + args.base[0] + "\n", fallback: null };
-            }
-            if (args.path === "review-image.png" && args.target === hash("a") && !args.reverse) return { patch: null, fallback: "binary" };
-            if (args.path === "new ł.txt" && args.base === hash("b") && args.target === hash("a") && args.previousPath === null) {
-              return { patch: "+new in this commit\n", fallback: null };
-            }
-            if (args.base !== hash("a") || args.target !== hash("c") || args.path !== "compare.txt") throw "invalid comparison";
-            return { patch: "-old\n+new\n", fallback: null };
           case "git_graph_upstream":
             assertRoot(args.root);
             return args.reference === "refs/heads/main" ? { reference: "refs/remotes/backup/graph-upstream", tip: hash("e") } : null;
@@ -164,6 +151,16 @@ try {
           case "git_file_revision": {
             assertRoot(args.root);
             const revision = args.revision === "refs/heads/main" ? hash("a") : args.revision === "refs/tags/v1" ? hash("f") : args.revision;
+            const fixtureVersion = (text, state = "available") => ({ revision, path: args.path, content: { state, text } });
+            if (args.path === "review-new.txt" && revision === hash("a")) return fixtureVersion("forward review\n");
+            if (args.path === "review-old.txt" && revision === hash("b")) return fixtureVersion("original review\n");
+            if (args.path === "merge-review.txt") return fixtureVersion(revision === hash("a") ? "merge result\n" : `mainline ${revision[0]}\n`);
+            if (args.path === "new ł.txt" && revision === hash("a")) return fixtureVersion("new in this commit\n");
+            if (args.path === "review-image.png") return fixtureVersion(undefined, "binary");
+            if (args.path === "compare.txt") return fixtureVersion(revision === hash("c") ? "new\n" : "old\n");
+            if (args.path === "stashed.txt") return fixtureVersion(revision === hash("b") ? "saved stash diff\n" :
+              revision === hash("d") ? "saved staged version\n" : "base stash version\n");
+            if (args.path === "untracked.txt") return fixtureVersion("saved untracked file\n");
             if (window.holdFileRevision && revision === hash("c")) return new Promise((resolve) => {
               window.finishFileRevision = () => resolve({ revision, path: args.path, content: {
                 state: "available", text: "Late response for another row",
@@ -406,7 +403,10 @@ try {
           case "git_discard_plan":
             assertRoot(args.root);
             return { review: { expected: args.expected, change: args.change, stamps: [] },
-              diff: { patch: "+discard preview\n", fallback: null } };
+              diff: { patch: null, fallback: null, versions: {
+                left: { state: "available", text: "version in index\n" },
+                right: { state: "available", text: "discard preview\n" },
+              } } };
           case "git_discard_worktree":
             assertRoot(args.root);
             window.gitDiscarded = args.review.change.path;
@@ -420,10 +420,13 @@ try {
             window.gitStashCreated = { message: args.message, untracked: args.untracked };
             stashes = [{ hash: hash("b"), position: 0, subject: args.message }];
             return null;
-          case "git_stash_preview":
+          case "git_stash_preview": {
             assertRoot(args.root);
-            return { combined: { patch: "+saved stash diff\n", fallback: null },
-              staged: { patch: "+saved staged version\n", fallback: null }, working: { patch: "+saved working version\n", fallback: null } };
+            const change = { status: "M", path: "stashed.txt", previousPath: null };
+            return { combined: [{ base: hash("a"), target: hash("b"), change },
+              { base: null, target: hash("e"), change: { status: "A", path: "untracked.txt", previousPath: null } }],
+              staged: [{ base: hash("a"), target: hash("d"), change }], working: [{ base: hash("d"), target: hash("b"), change }] };
+          }
           case "git_update_stash":
             assertRoot(args.root);
             window.gitStashAction = { hash: args.entry.hash, action: args.action, restoreIndex: args.restoreIndex };
@@ -493,10 +496,10 @@ try {
   const mainline = history.getByRole("combobox", { name: "Mainline parent", exact: true });
   await mainline.selectOption("1");
   await history.getByText("Inverse of the source commit", { exact: true }).waitFor();
-  await history.getByText("+mainline b", { exact: true }).waitFor();
+  await history.getByText("mainline b", { exact: true }).waitFor();
   await mainline.selectOption("2");
-  await history.getByText("+mainline c", { exact: true }).waitFor();
-  assert.equal(await history.getByText("+mainline b", { exact: true }).count(), 0);
+  await history.getByText("mainline c", { exact: true }).waitFor();
+  assert.equal(await history.getByText("mainline b", { exact: true }).count(), 0);
   await button(history, "History actions").click();
   await merge.click();
   await history.getByText("Changed paths relative to the first parent").waitFor();
@@ -504,7 +507,8 @@ try {
   await history.getByText("new ł.txt", { exact: true }).click({ button: "right" });
   await menuItem(gitMenu("new ł.txt"), "Show change").click();
   const historicalChange = page.getByRole("dialog", { name: "Change preview", exact: true });
-  await historicalChange.getByText("+new in this commit", { exact: true }).waitFor();
+  await historicalChange.getByText("new in this commit", { exact: true }).waitFor();
+  await historicalChange.getByLabel("File differences", { exact: true }).waitFor();
   await button(historicalChange, "Close dialog").click();
   await button(history, "Copy commit hash").click();
   assert.equal(await page.evaluate(() => window.gitCopied), "a".repeat(40));
@@ -540,7 +544,13 @@ try {
   await history.getByText("Base-only commit", { exact: false }).waitFor();
   await history.getByText("Target-only commit", { exact: false }).waitFor();
   await history.getByRole("button", { name: /compare\.txt/ }).click();
-  await history.getByText("+new", { exact: true }).waitFor();
+  await history.getByText("new", { exact: true }).waitFor();
+  const revisionDifferences = history.getByLabel("File differences", { exact: true });
+  await button(history, "Options").click();
+  await history.getByRole("combobox", { name: "Layout", exact: true }).selectOption("unified");
+  assert.equal(await revisionDifferences.getAttribute("data-layout"), "unified");
+  await history.getByRole("combobox", { name: "Layout", exact: true }).selectOption("side-by-side");
+  assert.equal(await revisionDifferences.getAttribute("data-layout"), "side-by-side");
   assert.deepEqual(await page.evaluate(() => window.gitCompared), { base: "a".repeat(40), target: "refs/tags/v1" });
   assert.equal(await page.evaluate(() => window.gitLastAction), undefined);
   await button(history, "Compare revisions").click();
@@ -782,14 +792,14 @@ try {
   await history.getByText("origin/topic", { exact: true }).waitFor();
   await history.getByText("main", { exact: true }).waitFor();
   await history.getByText("Commit under review", { exact: true }).waitFor();
-  await history.getByText("+forward review", { exact: true }).waitFor();
+  await history.getByText("forward review", { exact: true }).waitFor();
   await button(history, "Copy commit hash").click();
   assert.equal(await page.evaluate(() => window.gitCopied), "a".repeat(40));
   await button(history, "review-image.png").click();
-  await history.getByText("A text diff is unavailable for binary content.", { exact: true }).waitFor();
+  await history.getByText("This revision contains binary data.", { exact: true }).waitFor();
   await button(history, "Cherry-pick commit").click();
   const pick = page.getByRole("dialog", { name: "Cherry-pick commit", exact: true });
-  await pick.getByText("A text diff is unavailable for binary content.", { exact: true }).waitFor();
+  await pick.getByText("This revision contains binary data.", { exact: true }).waitFor();
   await button(pick, "Cancel").click();
   assert.equal(await page.evaluate(() => window.gitEdited.action), "hardReset");
   await button(history, "Cherry-pick commit").click();
@@ -1055,7 +1065,7 @@ try {
   await edited.click();
   await button(preview, "Discard…").click();
   const discard = page.getByRole("dialog", { name: "Discard working change", exact: true });
-  await discard.getByLabel("Inline diff", { exact: true }).filter({ hasText: "+discard preview" }).waitFor();
+  await discard.getByLabel("File differences", { exact: true }).getByText("discard preview", { exact: true }).waitFor();
   assert.equal(await page.evaluate(() => window.gitDiscarded), undefined);
   await button(discard, "Discard working change").click();
   await page.waitForFunction(() => window.gitDiscarded === "note.txt");
@@ -1072,9 +1082,11 @@ try {
   await stashes.getByRole("textbox", { name: "Stash message", exact: true }).fill("Fixture stash");
   await stashes.getByRole("checkbox", { name: "Include untracked files", exact: true }).check();
   await button(stashes, "Create stash").click();
-  await stashes.getByLabel("Stash diff", { exact: true }).filter({ hasText: "+saved stash diff" }).waitFor();
+  await stashes.getByLabel("Stash diff", { exact: true }).getByText("saved stash diff", { exact: true }).waitFor();
+  await stashes.getByRole("button", { name: /untracked.txt/ }).click();
+  await stashes.getByText("saved untracked file", { exact: true }).waitFor();
   await button(stashes, "Staged").click();
-  await stashes.getByLabel("Stash diff", { exact: true }).filter({ hasText: "+saved staged version" }).waitFor();
+  await stashes.getByLabel("Stash diff", { exact: true }).getByText("saved staged version", { exact: true }).waitFor();
   assert.deepEqual(await page.evaluate(() => window.gitStashCreated), { message: "Fixture stash", untracked: true });
   await stashes.getByRole("button", { name: /stash@\{0\} · Fixture stash/ }).click({ button: "right" });
   await menuItem(gitMenu("Fixture stash"), "Apply stash").click();

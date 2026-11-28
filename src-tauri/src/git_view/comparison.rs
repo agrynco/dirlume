@@ -57,32 +57,42 @@ pub(super) fn resolve_commit(git: &Path, root: &Path, revision: &str) -> Result<
 fn compare(git: &Path, root: &Path, base: &str, target: &str) -> Result<Comparison> {
     let base = resolve_commit(git, root, base)?;
     let target = resolve_commit(git, root, target)?;
-    let changes = bounded(
-        git,
-        root,
-        &[
-            "diff",
-            "--name-status",
-            "-z",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--no-relative",
-            "--find-renames",
-            "--ignore-submodules=none",
-            &base,
-            &target,
-            "--",
-        ],
-        STATUS_LIMIT,
-    )?
-    .ok_or(GitError::Unreadable)?;
+    let changes = changed_paths(git, root, Some(&base), &target)?;
     Ok(Comparison {
         base_only: unique_history(git, root, &base, &target, 0)?,
         target_only: unique_history(git, root, &target, &base, 0)?,
         base,
         target,
-        changes: parse_changes(&changes)?,
+        changes,
     })
+}
+
+pub(super) fn changed_paths(
+    git: &Path,
+    root: &Path,
+    base: Option<&str>,
+    target: &str,
+) -> Result<Vec<Change>> {
+    let mut args = if base.is_some() {
+        vec!["diff"]
+    } else {
+        vec!["diff-tree", "--root", "--no-commit-id", "-r"]
+    };
+    args.extend([
+        "--name-status",
+        "-z",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-relative",
+        "--find-renames",
+        "--ignore-submodules=none",
+    ]);
+    if let Some(base) = base {
+        args.push(oid(base)?);
+    }
+    args.extend([oid(target)?, "--"]);
+    let changes = bounded(git, root, &args, STATUS_LIMIT)?.ok_or(GitError::Unreadable)?;
+    parse_changes(&changes)
 }
 
 fn unique_history(

@@ -14,7 +14,7 @@ import { GitHistoryTools, type HistoryAction } from "./GitHistoryTools";
 import { GitMerge, gitOperationStatus } from "./GitMerge";
 import { GitRepositoryTools } from "./GitRepositoryTools";
 import { GitRepositorySetup } from "./GitRepositorySetup";
-import { GitRevisionComparison, GitRevisionPatch } from "./GitRevisionComparison";
+import { GitRevisionComparison, GitRevisionChange } from "./GitRevisionComparison";
 import { GitSyncTools } from "./GitSyncTools";
 import { GitWorkingComparison } from "./GitWorkingComparison";
 import type { ComparisonShortcuts } from "./TextTools";
@@ -50,6 +50,7 @@ const branchHints = {
 
 type HistoricalPath = { path: string; tip: string; mode: "history" | "blame" };
 type InspectCommit = {
+  shortcuts: ComparisonShortcuts;
   actions: (commit: GitCommit, showDetails?: () => void) => GitAction[];
   openPath: (target: HistoricalPath) => void;
   copy: (value: string, message: string) => void;
@@ -105,7 +106,7 @@ function ChangeDetails({ root, commit, onTarget, inspect, highlight }: {
       {diff && <Dialog title={t("Change preview")} helpTopic="gitView" wide onClose={() => setDiff(undefined)}>
         <div className="dialog-body">
           <p>{diff.previousPath ? diff.previousPath + " → " + diff.path : diff.path}</p>
-          <GitRevisionPatch root={root} base={details.firstParent ?? null} target={commit.hash} change={diff} />
+          <GitRevisionChange root={root} base={details.firstParent ?? null} target={commit.hash} change={diff} shortcuts={inspect.shortcuts} />
         </div>
       </Dialog>}
     </> : <p role="status">{t("Loading commit details…")}</p>}
@@ -257,6 +258,7 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
     setHistoryMode("sync");
   }
   const inspect: InspectCommit = {
+    shortcuts: { ...compareShortcuts, swapShortcut: [] },
     actions: (commit, showDetails) => [
       ...(showDetails ? [{ label: "Show commit details", icon: Eye, run: showDetails }] : []),
       { label: "Copy commit hash", icon: Copy, run: () => copy(commit.hash, "Commit hash copied.") },
@@ -487,7 +489,7 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
         ? <GitHistoryTools key={JSON.stringify([repository.root, pull?.upstream, historyTarget])} repository={repository}
           initialTarget={historyTarget?.revision ?? tip}
           initialRef={pull?.method === "rebase" ? pull.upstream : historyTarget ? undefined : branch?.reference}
-          initialAction={pull?.method === "rebase" ? "rebase" : historyTarget?.action} onRefresh={onRefresh} />
+          initialAction={pull?.method === "rebase" ? "rebase" : historyTarget?.action} onRefresh={onRefresh} shortcuts={inspect.shortcuts} />
         : historyMode === "repository"
         ? <GitRepositoryTools key={JSON.stringify([repository.root, bisectTarget])} repository={repository} refresh={refresh}
           bisectTarget={bisectTarget} onRefresh={onRefresh} onOpen={onOpenWorktree} onTerminal={onTerminal} />
@@ -498,7 +500,7 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
             setHistoryMode(method === "merge" ? "merge" : "tools"); }} />
         : historyMode === "compare"
         ? <GitRevisionComparison key={JSON.stringify([repository.root, compareTarget ?? selected, refresh])}
-          repository={repository} target={compareTarget ?? tip} commitActions={inspect.actions} onInspectPath={inspect.openPath}
+          repository={repository} target={compareTarget ?? tip} commitActions={inspect.actions} onInspectPath={inspect.openPath} shortcuts={inspect.shortcuts}
           onCopyPath={(path) => copy(path, "Path copied to the clipboard.")}
           renderDetails={(commit) => <ChangeDetails root={repository.root} commit={commit} onTarget={useHistoryTarget} inspect={inspect} />} />
         : historyMode === "graph" && tip
