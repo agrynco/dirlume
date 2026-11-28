@@ -96,7 +96,7 @@ impl From<io::Error> for WriteError {
     }
 }
 
-fn git_path(git: &Path, root: &Path, name: &str) -> Result<PathBuf> {
+pub(super) fn git_path(git: &Path, root: &Path, name: &str) -> Result<PathBuf> {
     let path = line(success(run(
         git,
         root,

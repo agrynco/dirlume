@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { GitCommitHorizontal } from "lucide-react";
-import { api, type GitBranch as Branch, type GitBranchAction, type GitBranchRequest, type GitCommit, type GitDetails, type GitHistory, type GitRepository, type NamedFile } from "./api";
+import { api, type GitBranch as Branch, type GitBranchAction, type GitBranchRequest, type GitCommit, type GitDetails, type GitHistory, type GitMergeState, type GitRepository, type NamedFile } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { GitChanges, writeError } from "./GitChanges";
+import { GitMerge } from "./GitMerge";
 import { GitRevisionComparison } from "./GitRevisionComparison";
 import { t } from "./i18n";
 import { useTimestamps } from "./useTimestamps";
@@ -180,7 +181,8 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState("");
   const [changes, setChanges] = useState(false);
-  const [historyMode, setHistoryMode] = useState<"history" | "graph" | "file" | "compare">("history");
+  const [historyMode, setHistoryMode] = useState<"history" | "graph" | "file" | "compare" | "merge">("history");
+  const [mergeState, setMergeState] = useState<GitMergeState | null>(null);
   const [selectedChange, setSelectedChange] = useState("");
   const [draft, setDraft] = useState<{ root: string; message: string }>();
   const [branchReview, setBranchReview] = useState<{ request: GitBranchRequest; root: string; branchName: string }>();
@@ -204,6 +206,17 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
     }, (error: unknown) => { if (!canceled) setError(gitError(error)); });
     return () => { canceled = true; };
   }, [path, refresh]);
+  const root = repository?.root;
+  useEffect(() => {
+    if (!root) return;
+    let canceled = false;
+    void api.gitMergeState(root).then((state) => {
+      if (canceled) return;
+      setMergeState(state);
+      if (state) setHistoryMode("merge");
+    }, () => { if (!canceled) setMergeState(null); });
+    return () => { canceled = true; };
+  }, [root, refresh]);
   const checkedOut = repository?.headRef ?? "HEAD";
   const branch = repository?.branches.find(({ reference }) => reference === selected);
   const tip = branch?.tip ?? (selected === checkedOut ? repository?.head ?? undefined : undefined);
@@ -303,13 +316,13 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
           branches.current?.querySelector<HTMLElement>("[role=option][tabindex='0']")?.focus();
         }} />}
       {repository && !error && <div className="git-branch-actions" role="group" aria-label={t("Branch actions")}>
-        <Button disabled={!tip || branchWorking} onClick={() => reviewBranch("create")}>{t(branchActions.create)}</Button>
+        <Button disabled={!tip || branchWorking || !!mergeState} onClick={() => reviewBranch("create")}>{t(branchActions.create)}</Button>
         {branch?.remote
-          ? <Button disabled={branchWorking} onClick={() => reviewBranch("track")}>{t(branchActions.track)}</Button>
+          ? <Button disabled={branchWorking || !!mergeState} onClick={() => reviewBranch("track")}>{t(branchActions.track)}</Button>
           : <>
-            <Button disabled={!branch || selected === checkedOut || branchWorking} onClick={() => reviewBranch("switch")}>{t(branchActions.switch)}</Button>
-            <Button disabled={!branch || branchWorking} onClick={() => reviewBranch("rename")}>{t(branchActions.rename)}</Button>
-            <Button disabled={!branch || selected === checkedOut || branchWorking} onClick={() => reviewBranch("delete")}>{t(branchActions.delete)}</Button>
+            <Button disabled={!branch || selected === checkedOut || branchWorking || !!mergeState} onClick={() => reviewBranch("switch")}>{t(branchActions.switch)}</Button>
+            <Button disabled={!branch || branchWorking || !!mergeState} onClick={() => reviewBranch("rename")}>{t(branchActions.rename)}</Button>
+            <Button disabled={!branch || selected === checkedOut || branchWorking || !!mergeState} onClick={() => reviewBranch("delete")}>{t(branchActions.delete)}</Button>
           </>}
       </div>}
       {branchFailure && <p className="git-error" role="alert">{branchFailure}</p>}
@@ -332,9 +345,14 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
             onClick={() => setHistoryMode(historyMode === "file" ? "history" : "file")}>{t("File history")}</Button>
           <Button disabled={!repository || !!error} aria-pressed={historyMode === "compare"}
             onClick={() => setHistoryMode(historyMode === "compare" ? "history" : "compare")}>{t("Compare revisions")}</Button>
+          <Button disabled={(!branch || selected === checkedOut) && !mergeState} aria-pressed={historyMode === "merge"}
+            onClick={() => setHistoryMode(historyMode === "merge" ? "history" : "merge")}>{t(mergeState ? "Merge in progress" : "Merge branch")}</Button>
         </div>
       </header>
-      {repository && !changes && (historyMode === "compare"
+      {repository && !changes && (historyMode === "merge"
+        ? <GitMerge key={repository.root} root={repository.root} source={branch && selected !== checkedOut ? branch.reference : ""}
+          state={mergeState} refresh={refresh} onRefresh={onRefresh} onOpen={onOpen} canEdit={canEdit} />
+        : historyMode === "compare"
         ? <GitRevisionComparison key={repository.root + ":" + selected + ":" + refresh} repository={repository} target={tip} />
         : historyMode === "graph" && tip
           ? <CommitGraph key={tip + ":" + refresh} root={repository.root} tip={tip} />

@@ -445,6 +445,37 @@ export interface GitComparison {
 
 export type GitRevisionDiff = Pick<GitWorkingDiff, "patch" | "fallback">;
 
+export interface GitMergeReview {
+  headRef: string;
+  head: string;
+  sourceRef: string;
+  sourceTip: string;
+}
+export interface GitMergePlan {
+  review: GitMergeReview;
+  fastForward: boolean;
+  upToDate: boolean;
+  changes: GitDetails["changes"];
+}
+export interface GitMergeSession { head: string; sources: string[] }
+interface GitMergeVersion { mode: string; oid: string }
+export interface GitMergeConflict {
+  path: string;
+  base: GitMergeVersion | null;
+  ours: GitMergeVersion | null;
+  theirs: GitMergeVersion | null;
+}
+export interface GitMergeState { session: GitMergeSession; conflicts: GitMergeConflict[] }
+interface GitConflictText { text: string | null; fallback: "binary" | "oversized" | "unsupported" | null }
+export interface GitConflictPreview {
+  base: GitConflictText | null;
+  ours: GitConflictText | null;
+  theirs: GitConflictText | null;
+  workingPath: string | null;
+}
+export type GitMergeResolution = "ours" | "theirs" | "working";
+export type GitMergeMode = "fastForward" | "mergeCommit";
+
 export type GitChangeGroup = "staged" | "unstaged" | "untracked";
 export type GitWorkingChange = GitDetails["changes"][number] & { group: GitChangeGroup };
 export interface GitIndexSnapshot {
@@ -687,6 +718,16 @@ export const api = {
     invoke<GitHistory>("git_revision_history", { root, included, excluded, offset }),
   gitRevisionDiff: (root: string, base: string, target: string, path: string, previousPath: string | null) =>
     invoke<GitRevisionDiff>("git_revision_diff", { root, base, target, path, previousPath }),
+  gitMergeState: (root: string) => invoke<GitMergeState | null>("git_merge_state", { root }),
+  gitMergePlan: (root: string, source: string) => invoke<GitMergePlan>("git_merge_plan", { root, source }),
+  gitStartMerge: (root: string, review: GitMergeReview, mode: GitMergeMode) =>
+    invoke<void>("git_start_merge", { root, review, mode }),
+  gitInspectMerge: (root: string, session: GitMergeSession, conflict: GitMergeConflict) =>
+    invoke<GitConflictPreview>("git_inspect_merge", { root, session, conflict }),
+  gitResolveMerge: (root: string, session: GitMergeSession, conflict: GitMergeConflict, resolution: GitMergeResolution) =>
+    invoke<void>("git_resolve_merge", { root, session, conflict, resolution }),
+  gitFinishMerge: (root: string, session: GitMergeSession, abort: boolean) =>
+    invoke<void>("git_finish_merge", { root, session, abort }),
   gitIndexState: (root: string) => invoke<GitWorkingIndex>("git_index_state", { root }),
   gitUpdateIndex: (root: string, expected: GitIndexSnapshot, change: GitWorkingChange, action: GitIndexAction, replace: boolean) =>
     invoke<void>("git_update_index", { root, expected, change, action, replace }),
