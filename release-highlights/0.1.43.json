@@ -1,0 +1,10 @@
+{
+  "version": "0.1.43",
+  "highlights": [
+    "Merge branches in Git View. Inspect Base, Ours, and Theirs, edit a working result, and continue or abort after reopening Dirlume.",
+    "Stage individual text hunks or multiple files. Review discard, amend commits, and preserve staged and working versions with stashes.",
+    "Cherry-pick or revert commits, reorder or combine commits during rebase, preview resets, and recover commits from the reflog.",
+    "Clone or initialize repositories, manage remotes and upstreams, fetch, pull, and review branch or tag pushes and deletions.",
+    "Manage linked worktrees and submodules, transfer Git LFS objects, run a bisect, and open a terminal at the active worktree."
+  ]
+}

@@ -9,6 +9,13 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) mod branches;
 pub(crate) mod comparison;
+pub(crate) mod history_edits;
+pub(crate) mod merge;
+pub(crate) mod rebase;
+pub(crate) mod remote_push;
+pub(crate) mod stash;
+pub(crate) mod sync;
+pub(crate) mod workspace;
 pub(crate) mod writes;
 
 #[derive(Debug, Serialize)]

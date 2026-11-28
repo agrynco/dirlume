@@ -329,7 +329,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const [folderSizesEnabled, setFolderSizesEnabled] = useState({ left: false, right: false });
   const folderScanSudo = useSudoFolderScan();
   const treeBrowseSudo = useSudoFolderScan("browse");
-  const [gitView, setGitView] = useState<{ side: Side; source: Side; path: string } | null>(null);
+  const [gitView, setGitView] = useState<{ side: Side; source: Side; path: string; terminal?: { path: string; request: number } } | null>(null);
   const [gitRefresh, setGitRefresh] = useState(0);
   const [swappedPanes, setSwappedPanes] = useState(false);
   const [environmentPanels, setEnvironmentPanels] = useState<Record<Side, EnvironmentMode | null>>({ left: null, right: null });
@@ -530,7 +530,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       await load(side, directory, "refresh", name);
     }
   }
-  const terminalLocation = analysis?.location.place ?? treeFolder(active) ?? pane.place;
+  const terminalLocation = gitView?.terminal ? localPath(gitView.terminal.path) :
+    analysis?.location.place ?? treeFolder(active) ?? pane.place;
   const terminalPlace = terminalLocation?.kind === "local" || terminalLocation?.kind === "ssh" ? terminalLocation : null;
   const terminalKey = terminalPlace ? terminalPlace.kind === "ssh" ? "ssh:" + terminalPlace.id : "local" : null;
   const terminal = terminalKey ? terminals[terminalKey] : undefined;
@@ -2759,8 +2760,19 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     });
   }
 
+  function openGitTerminal(path: string) {
+    const session = openTerminal(true, localPath(path));
+    if (!session) return;
+    setGitView((current) => current && { ...current, terminal: { path, request: (current.terminal?.request ?? 0) + 1 } });
+    setFileOpensVisible(false);
+    setUserMenuOutput(false);
+    setTerminalShare(terminalHeight);
+    focusTerminalInput();
+  }
+
   function followShellDirectory(session: TerminalSession, path: string) {
-    if (session.id !== terminal?.id || !terminalVisible || fileOpensVisible || activeDocument !== null || processPanels[active] || diskActive) return;
+    if (session.id !== terminal?.id || !terminalVisible || fileOpensVisible || activeDocument !== null || processPanels[active] ||
+        diskActive || gitView?.terminal) return;
     const place = terminalPlace;
     if (!place || (session.kind === "local" ? place.kind !== "local" :
       place.kind !== "ssh" || place.id !== session.connection)) return;
@@ -3946,8 +3958,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         {gitView && <Suspense fallback={<section className={"pane git-pane git-pane-" + gitView.side}>
           <p className="pane-empty" role="status">{t("Reading Git repository…")}</p>
         </section>}>
-          <GitView side={gitView.side} path={gitView.path} refresh={gitRefresh}
+          <GitView key={gitView.path} side={gitView.side} path={gitView.path} refresh={gitRefresh}
             onOpen={openDocument} canEdit={(file) => imageType(file.name) ? canEditImage(file) : writableTextPlace(file.place)}
+            onOpenWorktree={(path) => setGitView((current) => current && { ...current, path })}
+            onTerminal={openGitTerminal}
             onRefresh={() => setGitRefresh((revision) => revision + 1)} onClose={closeGitView} />
         </Suspense>}
         {(["left", "right"] as const).map((side) => diskPanes[side] && <DiskInformation key={side + diskPanes[side]}
@@ -4097,6 +4111,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         {Object.entries(terminals).map(([key, session]) => (
           <TerminalPanel key={session.id} session={session}
             directory={key === terminalKey && terminalPlace && !processPanels[active] ? placePath(terminalPlace) : null}
+            directoryRequest={key === terminalKey ? gitView?.terminal?.request : undefined}
             visible={key === terminalViewKey && terminalVisible && !fileOpensVisible && activeDocument === null} theme={theme} scheme={scheme}
             fontSize={preferences.viewFontSizes.terminal}
             history={localTerminalHistory}

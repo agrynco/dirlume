@@ -445,6 +445,116 @@ export interface GitComparison {
 
 export type GitRevisionDiff = Pick<GitWorkingDiff, "patch" | "fallback">;
 
+export interface GitMergeReview {
+  headRef: string;
+  head: string;
+  sourceRef: string;
+  sourceTip: string;
+}
+export interface GitMergePlan {
+  review: GitMergeReview;
+  fastForward: boolean;
+  upToDate: boolean;
+  changes: GitDetails["changes"];
+}
+export type GitOperation = "merge" | "cherryPick" | "revert" | "rebase";
+export interface GitMergeSession { operation: GitOperation; head: string; sources: string[] }
+interface GitMergeVersion { mode: string; oid: string }
+export interface GitMergeConflict {
+  path: string;
+  base: GitMergeVersion | null;
+  ours: GitMergeVersion | null;
+  theirs: GitMergeVersion | null;
+}
+export interface GitMergeState { session: GitMergeSession; conflicts: GitMergeConflict[] }
+interface GitConflictText { text: string | null; fallback: "binary" | "oversized" | "unsupported" | null }
+export interface GitConflictPreview {
+  base: GitConflictText | null;
+  ours: GitConflictText | null;
+  theirs: GitConflictText | null;
+  workingPath: string | null;
+}
+export type GitMergeResolution = "ours" | "theirs" | "working";
+export type GitMergeMode = "fastForward" | "mergeCommit";
+
+export type GitHistoryAction = "cherryPick" | "revert" | "softReset" | "mixedReset" | "hardReset";
+export interface GitHistoryReview {
+  action: GitHistoryAction;
+  head: string;
+  headRef: string | null;
+  target: string;
+  parent: number | null;
+  index: GitIndexSnapshot;
+  trackedChanges: number[] | null;
+}
+export interface GitHistoryPlan {
+  review: GitHistoryReview;
+  parents: string[];
+  paths: GitDetails["changes"];
+  localChanges: GitWorkingChange[];
+}
+export interface GitRebaseReview {
+  head: string;
+  headRef: string;
+  base: string;
+  baseRef: string | null;
+  index: GitIndexSnapshot;
+}
+export interface GitRebasePlan { review: GitRebaseReview; commits: GitCommit[]; merges: string[] }
+export type GitRebaseAction = "pick" | "reword" | "squash" | "drop";
+export interface GitRebaseStep { hash: string; action: GitRebaseAction; message: string | null }
+export interface GitReflogEntry { hash: string; selector: string; action: string; subject: string }
+export interface GitReflog { entries: GitReflogEntry[]; nextOffset: number | null }
+export interface GitPushReview {
+  head: string;
+  headRef: string;
+  remote: string;
+  destination: string;
+  expected: string;
+  url: string;
+  urlDigest: number[];
+}
+export interface GitWorktree {
+  path: string;
+  head: string | null;
+  branch: string | null;
+  bare: boolean;
+  locked: boolean;
+  prunable: boolean;
+  primary: boolean;
+}
+export interface GitWorktreeCreate {
+  destination: string;
+  revision: string;
+  expectedCommit: string;
+  branch: string | null;
+  detach: boolean;
+}
+export interface GitSubmodule { path: string; status: string; head: string }
+export interface GitLfsState { installed: boolean; version: string | null; status: string | null; remotes: string[] }
+export type GitLfsAction = "fetch" | "pull" | "push";
+export interface GitBisectState { start: string; head: string; log: string; concluded: boolean }
+export type GitBisectAction = "good" | "bad" | "skip" | "reset";
+export type GitSetupAction = "clone" | "init" | "open";
+export interface GitRemote { name: string; fetchUrls: string[]; pushUrls: string[]; stamp: number[] }
+export type GitRemoteAction = "add" | "rename" | "setFetchUrl" | "setPushUrl" | "clearPushUrl" | "remove";
+export interface GitUpstream {
+  headRef: string | null;
+  head: string | null;
+  reference: string | null;
+  remote: string | null;
+  remoteRef: string | null;
+  tip: string | null;
+}
+export interface GitRemoteRefReview {
+  remote: GitRemote;
+  pushUrl: string;
+  source: string | null;
+  object: string | null;
+  destination: string;
+  deleteTip: string | null;
+}
+
 export type GitChangeGroup = "staged" | "unstaged" | "untracked";
 export type GitWorkingChange = GitDetails["changes"][number] & { group: GitChangeGroup };
 export interface GitIndexSnapshot {
@@ -460,6 +570,20 @@ export interface GitWorkingIndex {
   changes: GitWorkingChange[];
 }
 export type GitIndexAction = "stage" | "unstage";
+export interface GitBulkPlan {
+  expected: GitIndexSnapshot;
+  changes: GitWorkingChange[];
+  action: GitIndexAction;
+  stamps: unknown[];
+}
+export interface GitHunkReview { expected: GitIndexSnapshot; change: GitWorkingChange; stamp: number[] }
+export interface GitHunkPlan { review: GitHunkReview; hunks: string[] }
+export interface GitDiscardReview { expected: GitIndexSnapshot; change: GitWorkingChange; stamps: unknown[] }
+export interface GitDiscardPlan { review: GitDiscardReview; diff: GitWorkingDiff }
+export interface GitStashEntry { hash: string; position: number; subject: string }
+export interface GitStashPreview { combined: GitRevisionDiff; staged: GitRevisionDiff; working: GitRevisionDiff }
+export type GitStashAction = "apply" | "pop" | "drop";
+export interface GitStashResult { changes: GitWorkingChange[]; error: string | null }
 export interface GitWorkingDiff {
   workingPath: string | null;
   workingText: boolean;
@@ -687,11 +811,83 @@ export const api = {
     invoke<GitHistory>("git_revision_history", { root, included, excluded, offset }),
   gitRevisionDiff: (root: string, base: string, target: string, path: string, previousPath: string | null) =>
     invoke<GitRevisionDiff>("git_revision_diff", { root, base, target, path, previousPath }),
+  gitMergeState: (root: string) => invoke<GitMergeState | null>("git_merge_state", { root }),
+  gitMergePlan: (root: string, source: string) => invoke<GitMergePlan>("git_merge_plan", { root, source }),
+  gitStartMerge: (root: string, review: GitMergeReview, mode: GitMergeMode) =>
+    invoke<void>("git_start_merge", { root, review, mode }),
+  gitInspectMerge: (root: string, session: GitMergeSession, conflict: GitMergeConflict) =>
+    invoke<GitConflictPreview>("git_inspect_merge", { root, session, conflict }),
+  gitResolveMerge: (root: string, session: GitMergeSession, conflict: GitMergeConflict, resolution: GitMergeResolution) =>
+    invoke<void>("git_resolve_merge", { root, session, conflict, resolution }),
+  gitFinishMerge: (root: string, session: GitMergeSession, abort: boolean) =>
+    invoke<void>("git_finish_merge", { root, session, abort }),
+  gitHistoryPlan: (root: string, action: GitHistoryAction, target: string, parent: number | null) =>
+    invoke<GitHistoryPlan>("git_history_plan", { root, action, target, parent }),
+  gitEditHistory: (root: string, review: GitHistoryReview) =>
+    invoke<void>("git_edit_history", { root, review }),
+  gitRebasePlan: (root: string, target: string) => invoke<GitRebasePlan>("git_rebase_plan", { root, target }),
+  gitStartRebase: (root: string, review: GitRebaseReview, steps: GitRebaseStep[]) =>
+    invoke<void>("git_start_rebase", { root, review, steps }),
+  gitReflog: (root: string, offset: number) => invoke<GitReflog>("git_reflog", { root, offset }),
+  gitRecoverCommit: (root: string, target: string, name: string) =>
+    invoke<void>("git_recover_commit", { root, target, name }),
+  gitPushRemotes: (root: string) => invoke<string[]>("git_push_remotes", { root }),
+  gitPushLeasePlan: (root: string, remote: string, branch: string) =>
+    invoke<GitPushReview>("git_push_lease_plan", { root, remote, branch }),
+  gitPushWithLease: (root: string, review: GitPushReview) =>
+    invoke<void>("git_push_with_lease", { root, review }),
   gitIndexState: (root: string) => invoke<GitWorkingIndex>("git_index_state", { root }),
   gitUpdateIndex: (root: string, expected: GitIndexSnapshot, change: GitWorkingChange, action: GitIndexAction, replace: boolean) =>
     invoke<void>("git_update_index", { root, expected, change, action, replace }),
   gitCommitChanges: (root: string, expected: GitIndexSnapshot, message: string) =>
     invoke<string>("git_commit_changes", { root, expected, message }),
+  gitAmendChanges: (root: string, expected: GitIndexSnapshot, message: string) =>
+    invoke<string>("git_amend_changes", { root, expected, message }),
+  gitBulkPlan: (root: string, expected: GitIndexSnapshot, changes: GitWorkingChange[], action: GitIndexAction) =>
+    invoke<GitBulkPlan>("git_bulk_plan", { root, expected, changes, action }),
+  gitApplyBulk: (root: string, plan: GitBulkPlan) => invoke<void>("git_apply_bulk", { root, plan }),
+  gitHunkPlan: (root: string, expected: GitIndexSnapshot, change: GitWorkingChange) =>
+    invoke<GitHunkPlan | null>("git_hunk_plan", { root, expected, change }),
+  gitApplyHunk: (root: string, review: GitHunkReview, index: number) =>
+    invoke<void>("git_apply_hunk", { root, review, index }),
+  gitDiscardPlan: (root: string, expected: GitIndexSnapshot, change: GitWorkingChange) =>
+    invoke<GitDiscardPlan>("git_discard_plan", { root, expected, change }),
+  gitDiscardWorktree: (root: string, review: GitDiscardReview) =>
+    invoke<void>("git_discard_worktree", { root, review }),
+  gitStashes: (root: string) => invoke<GitStashEntry[]>("git_stashes", { root }),
+  gitStashPreview: (root: string, entry: GitStashEntry) =>
+    invoke<GitStashPreview>("git_stash_preview", { root, entry }),
+  gitCreateStash: (root: string, expected: GitIndexSnapshot, message: string, untracked: boolean) =>
+    invoke<void>("git_create_stash", { root, expected, message, untracked }),
+  gitUpdateStash: (root: string, expected: GitIndexSnapshot, entry: GitStashEntry, action: GitStashAction, restoreIndex: boolean) =>
+    invoke<GitStashResult>("git_update_stash", { root, expected, entry, action, restoreIndex }),
+  gitWorktrees: (root: string) => invoke<GitWorktree[]>("git_worktrees", { root }),
+  gitCreateWorktree: (root: string, review: GitWorktreeCreate) => invoke<void>("git_create_worktree", { root, review }),
+  gitRemoveWorktree: (root: string, review: GitWorktree) => invoke<void>("git_remove_worktree", { root, review }),
+  gitSubmodules: (root: string) => invoke<GitSubmodule[]>("git_submodules", { root }),
+  gitUpdateSubmodule: (root: string, review: GitSubmodule) => invoke<void>("git_update_submodule", { root, review }),
+  gitLfsState: (root: string) => invoke<GitLfsState>("git_lfs_state", { root }),
+  gitLfsTransfer: (root: string, remote: string, action: GitLfsAction) =>
+    invoke<void>("git_lfs_transfer", { root, remote, action }),
+  gitBisectState: (root: string) => invoke<GitBisectState | null>("git_bisect_state", { root }),
+  gitStartBisect: (root: string, expectedRef: string | null, expectedHead: string, good: string, bad: string) =>
+    invoke<void>("git_start_bisect", { root, expectedRef, expectedHead, good, bad }),
+  gitUpdateBisect: (root: string, review: GitBisectState, action: GitBisectAction) =>
+    invoke<void>("git_update_bisect", { root, review, action }),
+  gitRepositorySetup: (action: GitSetupAction, path: string, url: string | null) =>
+    invoke<string>("git_repository_setup", { action, path, url }),
+  gitRemotes: (root: string) => invoke<GitRemote[]>("git_remotes", { root }),
+  gitConfigureRemote: (root: string, action: GitRemoteAction, remote: GitRemote | null, value: string, url: string | null) =>
+    invoke<void>("git_configure_remote", { root, action, remote, value, url }),
+  gitFetchRemote: (root: string, remote: GitRemote, prune: boolean) =>
+    invoke<string>("git_fetch_remote", { root, remote, prune }),
+  gitUpstream: (root: string) => invoke<GitUpstream>("git_upstream", { root }),
+  gitSetUpstream: (root: string, expected: GitUpstream, reference: string | null) =>
+    invoke<void>("git_set_upstream", { root, expected, reference }),
+  gitRemoteRefReview: (root: string, remote: GitRemote, source: string | null, destination: string) =>
+    invoke<GitRemoteRefReview>("git_remote_ref_review", { root, remote, source, destination }),
+  gitTransferRemoteRef: (root: string, review: GitRemoteRefReview) =>
+    invoke<string>("git_transfer_remote_ref", { root, review }),
   gitWorkingDiff: (root: string, change: GitWorkingChange) => invoke<GitWorkingDiff>("git_working_diff", { root, change }),
   environmentScope: (scope: EnvironmentScope) => invoke<{ rows: EnvironmentRow[]; info: EnvironmentInfo }>("environment_scope", { scope }),
   environmentValue: (scope: EnvironmentScope, name: string) => invoke<EnvironmentValue | null>("environment_value", { scope, name }),

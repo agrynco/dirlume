@@ -15,6 +15,8 @@ try {
     const windows = /Windows/i.test(navigator.userAgent);
     const root = windows ? "C:\\repo ł" : "/repo ł";
     const sub = root + (windows ? "\\nested" : "/nested");
+    const linked = windows ? "C:\\linked repo ł" : "/linked repo ł";
+    const cloned = windows ? "C:\\cloned repo ł" : "/cloned repo ł";
     const file = { name: "note.txt", directory: false, link: false, hidden: false, size: 1, modified: null };
     const hash = (value) => value.repeat(40);
     const commit = (value, subject) => ({
@@ -22,6 +24,19 @@ try {
     });
     window.gitEvents = [];
     let indexVersion = 0;
+    let stashes = [];
+    const remotes = [
+      { name: "origin", fetchUrls: ["https://example.invalid/origin"], pushUrls: ["https://example.invalid/origin"], stamp: [1] },
+      { name: "backup", fetchUrls: ["https://example.invalid/backup"], pushUrls: ["https://example.invalid/backup"], stamp: [2] },
+    ];
+    let worktrees = [
+      { path: root, branch: "refs/heads/main", head: hash("a"), primary: true, locked: false, bare: false, prunable: false },
+      { path: linked, branch: "refs/heads/topic", head: hash("b"), primary: false, locked: false, bare: false, prunable: false },
+    ];
+    const conflictState = (operation) => ({ session: { operation, head: hash("a"), sources: [hash("c")] }, conflicts: [
+      { path: "conflict.txt", base: { mode: "100644", oid: hash("a") },
+        ours: { mode: "100644", oid: hash("b") }, theirs: { mode: "100644", oid: hash("c") } },
+    ] });
     let rows = [
       { group: "staged", status: "M", path: "note.txt", previousPath: null },
       { group: "unstaged", status: "M", path: "note.txt", previousPath: null },
@@ -38,7 +53,9 @@ try {
           case "git_repository":
             window.gitEvents.push(args.path);
             if (window.gitError) throw window.gitError;
-            return { root, name: "repo ł", headRef: window.gitDetached ? null : "refs/heads/main",
+            return { root: args.path === linked ? linked : args.path === cloned ? cloned : root,
+              name: args.path === linked ? "linked repo ł" : args.path === cloned ? "cloned repo ł" : "repo ł",
+              headRef: window.gitDetached ? null : args.path === linked ? "refs/heads/topic" : "refs/heads/main",
               head: window.gitEmpty ? null : hash("a"),
               branches: window.gitEmpty || window.gitDetached ? [] : [
                 { reference: "refs/heads/main", name: "main", tip: hash("a"), remote: false },
@@ -69,6 +86,146 @@ try {
             assertRoot(args.root);
             if (args.path !== "note.txt" || args.tip !== hash("c")) throw "invalid file revision";
             return "cccccccccccc (Fixture Author 2026-11-21 1) note\n";
+          case "git_merge_plan":
+            assertRoot(args.root);
+            return { review: { headRef: "refs/heads/main", head: hash("a"), sourceRef: args.source, sourceTip: hash("c") },
+              fastForward: false, upToDate: false, changes: [{ status: "M", path: "conflict.txt", previousPath: null }] };
+          case "git_merge_state":
+            assertRoot(args.root);
+            return window.gitMerge ?? null;
+          case "git_start_merge":
+            assertRoot(args.root);
+            if (args.review.sourceRef !== "refs/remotes/origin/topic" || args.mode !== "mergeCommit") throw "wrong reviewed branch";
+            window.gitMerge = conflictState("merge");
+            return null;
+          case "git_inspect_merge":
+            assertRoot(args.root);
+            return { base: { text: "base fixture", fallback: null }, ours: { text: "ours fixture", fallback: null },
+              theirs: { text: "theirs fixture", fallback: null }, workingPath: null };
+          case "git_resolve_merge":
+            assertRoot(args.root);
+            if (args.resolution !== "theirs" || args.conflict.path !== "conflict.txt") throw "wrong resolution";
+            window.gitMerge.conflicts = [];
+            return null;
+          case "git_finish_merge":
+            assertRoot(args.root);
+            window.gitFinishedOperation = { operation: args.session.operation, abort: args.abort };
+            window.gitMerge = null;
+            return null;
+          case "git_history_plan":
+            assertRoot(args.root);
+            return { review: { action: args.action, head: hash("a"), headRef: "refs/heads/main",
+              target: args.target, parent: args.parent, index: {}, trackedChanges: null },
+              parents: [], paths: [{ status: "M", path: "fixture-reset.txt", previousPath: null }], localChanges: rows };
+          case "git_edit_history":
+            assertRoot(args.root);
+            window.gitEdited = args.review;
+            if (args.review.action === "cherryPick") window.gitMerge = conflictState("cherryPick");
+            return null;
+          case "git_rebase_plan":
+            assertRoot(args.root);
+            return { review: { head: hash("a"), headRef: "refs/heads/main", base: hash("b"),
+              baseRef: args.target, index: {} }, merges: [],
+              commits: [commit("c", "First commit to replay"), commit("d", "Second commit to replay")] };
+          case "git_start_rebase":
+            assertRoot(args.root);
+            window.gitRebaseRequest = args;
+            return null;
+          case "git_reflog":
+            assertRoot(args.root);
+            return { entries: [{ hash: hash("d"), selector: "HEAD@{2026-11-21T01:00:00Z}",
+              action: "reset: moving to main", subject: "Recovered commit" }], nextOffset: null };
+          case "git_recover_commit":
+            assertRoot(args.root);
+            window.gitRecovered = args;
+            return null;
+          case "git_push_remotes":
+            assertRoot(args.root);
+            return ["origin", "review"];
+          case "git_push_lease_plan":
+            assertRoot(args.root);
+            return { head: hash("a"), headRef: "refs/heads/main", remote: args.remote, destination: "refs/heads/" + args.branch,
+              expected: hash("b"), url: "https://example.invalid/review/dirlume", urlDigest: [] };
+          case "git_push_with_lease":
+            assertRoot(args.root);
+            window.gitLease = args.review;
+            return null;
+          case "git_worktrees":
+            assertRoot(args.root);
+            return worktrees;
+          case "git_create_worktree":
+            assertRoot(args.root);
+            window.gitCreatedWorktree = args.review;
+            worktrees.push({ path: args.review.destination, branch: "refs/heads/" + args.review.branch,
+              head: args.review.expectedCommit, primary: false, locked: false, bare: false, prunable: false });
+            return null;
+          case "git_remove_worktree":
+            assertRoot(args.root);
+            if (window.gitWorktreeDirty) throw { kind: "failed", detail: "The worktree contains local changes." };
+            worktrees = worktrees.filter((tree) => tree.path !== args.review.path);
+            window.gitRemovedWorktree = args.review.path;
+            return null;
+          case "git_submodules":
+            assertRoot(args.root);
+            return [{ path: "modules/local fixture", status: window.gitModuleUpdated ? " " : "-", head: hash("b") }];
+          case "git_update_submodule":
+            assertRoot(args.root);
+            window.gitModuleUpdated = args.review.path;
+            return null;
+          case "git_lfs_state":
+            assertRoot(args.root);
+            return window.gitLfsInstalled ? { installed: true, version: "git-lfs/3.7.1", status: "LFS objects ready",
+              remotes: ["origin"] } : { installed: false, version: null, status: null, remotes: [] };
+          case "git_lfs_transfer":
+            assertRoot(args.root);
+            window.gitLfsTransfer = { action: args.action, remote: args.remote };
+            return null;
+          case "git_bisect_state":
+            assertRoot(args.root);
+            return window.gitBisect ?? null;
+          case "git_start_bisect":
+            assertRoot(args.root);
+            window.gitBisect = { start: "main", head: hash("c"), log: "git bisect start", concluded: false };
+            return null;
+          case "git_update_bisect":
+            assertRoot(args.root);
+            window.gitBisectAction = args.action;
+            window.gitBisect = args.action === "reset" ? null :
+              { ...window.gitBisect, concluded: true, log: "# first bad commit: " + hash("c") };
+            return null;
+          case "git_repository_setup":
+            window.gitSetup = args;
+            if (args.action === "clone" && window.gitClonePartial) {
+              throw { kind: "partialClone", detail: { path: args.path, message: "Git could not check out files." } };
+            }
+            return args.path;
+          case "git_remotes":
+            assertRoot(args.root);
+            return remotes;
+          case "git_fetch_remote":
+            assertRoot(args.root);
+            window.gitFetch = { remote: args.remote.name, prune: args.prune };
+            return "Fetched updated refs";
+          case "git_upstream":
+            assertRoot(args.root);
+            return { headRef: "refs/heads/main", head: hash("a"), reference: window.gitUpstream ?? null,
+              remote: window.gitUpstream ? "origin" : null, remoteRef: window.gitUpstream ? "refs/heads/topic" : null,
+              tip: window.gitUpstream ? hash("c") : null };
+          case "git_set_upstream":
+            assertRoot(args.root);
+            window.gitUpstream = args.reference;
+            return null;
+          case "git_remote_ref_review":
+            assertRoot(args.root);
+            return { remote: args.remote, pushUrl: args.remote.pushUrls[0], source: args.source, destination: args.destination,
+              object: args.source ? hash("a") : null, deleteTip: args.source ? null : hash("b") };
+          case "git_transfer_remote_ref":
+            assertRoot(args.root);
+            window.gitTransfer = args.review;
+            return "Updated reviewed reference";
+          case "open_terminal":
+            window.gitTerminalDirectory = args.request.directory;
+            return false;
           case "git_history":
             if (args.tip === hash("b")) return new Promise((resolve) => {
               window.finishOldHistory = () => resolve({ commits: [commit("b", "Stale local topic")], nextOffset: null });
@@ -82,6 +239,11 @@ try {
           case "git_index_state":
             assertRoot(args.root);
             if (window.workingError) throw "unreadable";
+            if (window.gitExtraChanges) {
+              window.gitExtraChanges = false;
+              rows.push({ group: "unstaged", status: "M", path: "note.txt", previousPath: null },
+                { group: "untracked", status: "?", path: "bulk.txt", previousPath: null });
+            }
             return { snapshot: { headRef: window.gitDetached ? null : "refs/heads/main",
               head: window.gitEmpty ? null : hash("a"), index: String(indexVersion), gitDir: root + "/.git" },
             writeBlocked: false, submodules: [], changes: window.workingClean ? [] : rows };
@@ -111,6 +273,57 @@ try {
             rows = rows.filter((row) => row.group !== "staged");
             indexVersion++;
             return "abcdef0";
+          case "git_amend_changes":
+            assertRoot(args.root);
+            window.gitAmended = args.message;
+            return "abcdef1";
+          case "git_hunk_plan":
+            assertRoot(args.root);
+            return { review: { expected: args.expected, change: args.change, stamp: [] },
+              hunks: ["@@ -4 +4 @@\n-before\n+first hunk\n", "@@ -24 +24 @@\n-before\n+second hunk\n"] };
+          case "git_apply_hunk":
+            assertRoot(args.root);
+            window.gitStagedHunk = { path: args.review.change.path, index: args.index };
+            indexVersion++;
+            return null;
+          case "git_bulk_plan":
+            assertRoot(args.root);
+            return { expected: args.expected, changes: args.changes, action: args.action, stamps: [] };
+          case "git_apply_bulk":
+            assertRoot(args.root);
+            window.gitBulk = args.plan.changes.map(({ path }) => path);
+            indexVersion++;
+            return null;
+          case "git_discard_plan":
+            assertRoot(args.root);
+            return { review: { expected: args.expected, change: args.change, stamps: [] },
+              diff: { patch: "+discard preview\n", fallback: null } };
+          case "git_discard_worktree":
+            assertRoot(args.root);
+            window.gitDiscarded = args.review.change.path;
+            rows = rows.filter((row) => row.path !== args.review.change.path);
+            return null;
+          case "git_stashes":
+            assertRoot(args.root);
+            return stashes;
+          case "git_create_stash":
+            assertRoot(args.root);
+            window.gitStashCreated = { message: args.message, untracked: args.untracked };
+            stashes = [{ hash: hash("b"), position: 0, subject: args.message }];
+            return null;
+          case "git_stash_preview":
+            assertRoot(args.root);
+            return { combined: { patch: "+saved stash diff\n", fallback: null },
+              staged: { patch: "+saved staged version\n", fallback: null }, working: { patch: "+saved working version\n", fallback: null } };
+          case "git_update_stash":
+            assertRoot(args.root);
+            window.gitStashAction = { hash: args.entry.hash, action: args.action, restoreIndex: args.restoreIndex };
+            if (args.action === "drop") {
+              stashes = [];
+              return { changes: [], error: null };
+            }
+            return { changes: [{ group: "unstaged", status: "U", path: "stash-conflict.txt", previousPath: null }],
+              error: "Git reported a conflict." };
           case "git_working_diff": {
             assertRoot(args.root);
             const { group, path } = args.change;
@@ -127,7 +340,7 @@ try {
       },
     };
     function assertRoot(path) {
-      if (path !== root) throw "notRepository";
+      if (path !== root && path !== linked && path !== cloned) throw "notRepository";
     }
   });
   await page.goto("http://dirlume.test/");
@@ -203,6 +416,206 @@ try {
   const tracking = page.getByRole("dialog", { name: "Create tracking branch and switch", exact: true });
   assert.equal(await tracking.getByRole("textbox", { name: "Branch name", exact: true }).inputValue(), "topic");
   await button(tracking, "Cancel").click();
+  await button(history, "Merge branch").click();
+  await history.getByText("refs/remotes/origin/topic", { exact: false }).waitFor();
+  assert.equal(await button(history, "Fast-forward only").isDisabled(), true);
+  await button(history, "Create merge commit").click();
+  await button(page.getByRole("dialog", { name: "Create merge commit", exact: true }), "Create merge commit").click();
+  await history.getByText("ours fixture", { exact: true }).waitFor();
+  assert.equal(await button(history, "Continue merge").isDisabled(), true);
+  await button(branches, "Close Git View").click();
+  await git.click();
+  await history.getByText("ours fixture", { exact: true }).waitFor();
+  await button(history, "Theirs").click();
+  await history.getByText("theirs fixture", { exact: true }).waitFor();
+  await button(history, "Use theirs").click();
+  await button(page.getByRole("dialog", { name: "Use theirs", exact: true }), "Use theirs").click();
+  await history.getByText("All conflicts are resolved.", { exact: true }).waitFor();
+  await button(history, "Continue merge").click();
+  await button(page.getByRole("dialog", { name: "Continue merge", exact: true }), "Continue merge").click();
+  await history.getByText("Select a source branch to merge.", { exact: true }).waitFor();
+  await button(history, "History actions").click();
+  const actionType = history.getByRole("combobox", { name: "History action", exact: true });
+  await actionType.selectOption("hardReset");
+  await history.getByRole("textbox", { name: "Target commit", exact: true }).fill("d".repeat(40));
+  await button(history, "Review changes").click();
+  await history.getByText("fixture-reset.txt", { exact: true }).waitFor();
+  await button(history, "Hard reset").click();
+  const reset = page.getByRole("dialog", { name: "Hard reset", exact: true });
+  await reset.getByText("Move HEAD, replace the index, and discard changes to tracked working files.", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitEdited), undefined);
+  await button(reset, "Hard reset").click();
+  await history.getByText("Git operation completed.", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitEdited.action), "hardReset");
+  await actionType.selectOption("rebase");
+  await history.getByRole("combobox", { name: "Rebase base", exact: true }).fill("refs/heads/topic");
+  await button(history, "Review changes").click();
+  await history.getByText("First commit to replay").waitFor();
+  await button(history, "Move earlier").last().click();
+  await history.getByRole("combobox", { name: "Rebase action", exact: true }).first().selectOption("reword");
+  await history.getByRole("textbox", { name: "Replacement commit message", exact: true }).fill("Reworded second");
+  await history.getByRole("combobox", { name: "Rebase action", exact: true }).last().selectOption("squash");
+  await button(history, "Rebase branch").click();
+  const rebase = page.getByRole("dialog", { name: "Rebase branch", exact: true });
+  assert.match(await rebase.locator("ol li").first().innerText(), /Reword.*Reworded second/);
+  await button(rebase, "Rebase branch").click();
+  await history.getByText("Git operation completed.", { exact: true }).waitFor();
+  assert.deepEqual((await page.evaluate(() => window.gitRebaseRequest.steps)).map((step) => [step.hash[0], step.action]),
+    [["d", "reword"], ["c", "squash"]]);
+  await actionType.selectOption("reflog");
+  await button(history, "Read reflog").click();
+  await history.getByText("Recovered commit", { exact: false }).waitFor();
+  await button(history, "Recover into new branch").click();
+  const recover = page.getByRole("dialog", { name: "Recover into new branch", exact: true });
+  await recover.getByRole("textbox", { name: "Branch name", exact: true }).fill("rescued");
+  await button(recover, "Recover into new branch").click();
+  await history.getByText("Git operation completed.", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitRecovered.name), "rescued");
+  await actionType.selectOption("push");
+  await history.getByRole("combobox", { name: "Remote", exact: true }).selectOption("review");
+  await history.getByRole("textbox", { name: "Destination branch", exact: true }).fill("topic");
+  await button(history, "Review changes").click();
+  await button(history, "Force-push with lease").click();
+  const lease = page.getByRole("dialog", { name: "Force-push with lease", exact: true });
+  await lease.getByText("refs/heads/topic", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitLease), undefined);
+  await button(lease, "Force-push with lease").click();
+  await history.getByText("Git operation completed.", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitLease.expected), "b".repeat(40));
+  await actionType.selectOption("cherryPick");
+  await button(history, "Review changes").click();
+  await button(history, "Cherry-pick commit").click();
+  await button(page.getByRole("dialog", { name: "Cherry-pick commit", exact: true }), "Cherry-pick commit").click();
+  await button(history, "Cherry-pick in progress").waitFor();
+  await button(branches, "Close Git View").click();
+  await git.click();
+  await history.getByText("ours fixture", { exact: true }).waitFor();
+  await button(history, "Abort cherry-pick").click();
+  await button(page.getByRole("dialog", { name: "Abort cherry-pick", exact: true }), "Abort cherry-pick").click();
+  await history.getByText("Select a source branch to merge.", { exact: true }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.gitFinishedOperation), { operation: "cherryPick", abort: true });
+  await button(history, "Repository tools").click();
+  const worktreePath = await page.evaluate(() => /Windows/i.test(navigator.userAgent) ? "C:\\created repo" : "/created repo");
+  const linkedPath = await page.evaluate(() => /Windows/i.test(navigator.userAgent) ? "C:\\linked repo ł" : "/linked repo ł");
+  await history.getByRole("textbox", { name: "Worktree path", exact: true }).fill(worktreePath);
+  await history.getByRole("textbox", { name: "Branch name", exact: true }).fill("created");
+  await button(history, "Create linked worktree").click();
+  const createTree = page.getByRole("dialog", { name: "Create linked worktree", exact: true });
+  await createTree.getByText(worktreePath, { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitCreatedWorktree), undefined);
+  await button(createTree, "Create linked worktree").click();
+  const createdTree = history.locator("li").filter({ hasText: worktreePath });
+  await button(createdTree, "Remove worktree").waitFor();
+  assert.equal(await page.evaluate(() => window.gitCreatedWorktree.branch), "created");
+  const removeTree = page.getByRole("dialog", { name: "Remove worktree", exact: true });
+  await page.evaluate(() => { window.gitWorktreeDirty = true; });
+  await button(createdTree, "Remove worktree").click();
+  await button(removeTree, "Remove worktree").click();
+  await history.getByRole("alert").getByText("The worktree contains local changes.").waitFor();
+  assert.equal(await page.evaluate(() => window.gitRemovedWorktree), undefined);
+  await page.evaluate(() => { window.gitWorktreeDirty = false; });
+  await button(createdTree, "Remove worktree").click();
+  await button(removeTree, "Remove worktree").click();
+  await createdTree.waitFor({ state: "hidden" });
+  await button(history.locator("li").filter({ hasText: linkedPath }), "Open worktree").click();
+  await branches.getByText("linked repo ł", { exact: true }).waitFor();
+  await button(history, "Repository tools").click();
+  await button(history, "Open terminal at worktree").click();
+  await page.waitForFunction((path) => window.gitTerminalDirectory === path, linkedPath);
+  await button(page.getByRole("region", { name: "Terminal", exact: true }), "Close terminal").click();
+  await button(history.locator("li").filter({ hasText: "Primary worktree" }), "Open worktree").click();
+  await branches.getByText("repo ł", { exact: true }).waitFor();
+  await button(history, "Repository tools").click();
+  await button(history, "Submodules").click();
+  await history.getByText("modules/local fixture", { exact: true }).waitFor();
+  await button(history, "Initialize submodule").click();
+  await button(page.getByRole("dialog", { name: "Initialize submodule", exact: true }), "Initialize submodule").click();
+  await button(history, "Update submodule").waitFor();
+  assert.equal(await page.evaluate(() => window.gitModuleUpdated), "modules/local fixture");
+  await button(history, "Git LFS").click();
+  await history.getByText("Git LFS is not installed.", { exact: true }).waitFor();
+  await page.evaluate(() => { window.gitLfsInstalled = true; });
+  await button(branches, "Refresh").click();
+  await history.getByLabel("Git LFS status", { exact: true }).filter({ hasText: "LFS objects ready" }).waitFor();
+  await button(history, "Fetch LFS objects").click();
+  await button(page.getByRole("dialog", { name: "Fetch LFS objects", exact: true }), "Fetch LFS objects").click();
+  await page.waitForFunction(() => window.gitLfsTransfer?.action === "fetch");
+  assert.equal(await page.evaluate(() => window.gitLfsTransfer.remote), "origin");
+  await button(history, "Bisect").click();
+  await history.getByRole("combobox", { name: "Known good commit", exact: true }).fill("d".repeat(40));
+  await button(history, "Start bisect").click();
+  await button(page.getByRole("dialog", { name: "Start bisect", exact: true }), "Start bisect").click();
+  await history.getByText("Bisect in progress", { exact: true }).waitFor();
+  await button(branches, "Close Git View").click();
+  await git.click();
+  await button(history, "Repository tools").click();
+  await button(history, "Mark bad").click();
+  await button(page.getByRole("dialog", { name: "Mark bad", exact: true }), "Mark bad").click();
+  await history.getByLabel("Bisect log", { exact: true }).filter({ hasText: "# first bad commit:" }).waitFor();
+  await button(history, "Finish bisect").click();
+  await button(page.getByRole("dialog", { name: "Finish bisect", exact: true }), "Finish bisect").click();
+  await page.waitForFunction(() => window.gitBisectAction === "reset");
+  const repoPath = await page.evaluate(() => /Windows/i.test(navigator.userAgent) ? "C:\\repo ł" : "/repo ł");
+  const clonePath = await page.evaluate(() => /Windows/i.test(navigator.userAgent) ? "C:\\cloned repo ł" : "/cloned repo ł");
+  await button(branches, "Repository setup…").click();
+  const setup = page.getByRole("dialog", { name: "Repository setup", exact: true });
+  await setup.getByRole("combobox", { name: "Repository action", exact: true }).selectOption("clone");
+  await setup.getByRole("textbox", { name: "Repository URL or path", exact: true }).fill("https://example.invalid/origin");
+  await setup.getByRole("textbox", { name: "Repository folder", exact: true }).fill(clonePath);
+  await button(setup, "Review changes").click();
+  const clone = page.getByRole("dialog", { name: "Clone repository", exact: true });
+  await clone.getByText(clonePath, { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitSetup), undefined);
+  await page.evaluate(() => { window.gitClonePartial = true; });
+  await button(clone, "Clone repository").click();
+  await setup.getByText("Git left a partial clone at " + clonePath + ".", { exact: true }).waitFor();
+  await button(setup, "Review opening the partial clone").click();
+  const openRepo = page.getByRole("dialog", { name: "Open existing repository", exact: true });
+  await button(openRepo, "Open existing repository").click();
+  await branches.getByText("cloned repo ł", { exact: true }).waitFor();
+  await button(branches, "Repository setup…").click();
+  await setup.getByRole("textbox", { name: "Repository folder", exact: true }).fill(repoPath);
+  await button(setup, "Review changes").click();
+  await button(openRepo, "Open existing repository").click();
+  await branches.getByText("repo ł", { exact: true }).waitFor();
+  await button(history, "Synchronize repository").click();
+  await history.getByRole("combobox", { name: "Remote", exact: true }).selectOption("backup");
+  await button(history, "Fetch and prune").click();
+  const fetch = page.getByRole("dialog", { name: "Fetch and prune", exact: true });
+  await fetch.getByText("https://example.invalid/backup", { exact: true }).waitFor();
+  await button(fetch, "Fetch and prune").click();
+  await history.getByLabel("Git output", { exact: true }).filter({ hasText: "Fetched updated refs" }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.gitFetch), { remote: "backup", prune: true });
+  await button(history, "Upstream").click();
+  await history.getByRole("combobox", { name: "Upstream branch", exact: true }).selectOption("refs/remotes/origin/topic");
+  await button(history, "Set upstream").click();
+  await button(page.getByRole("dialog", { name: "Set upstream", exact: true }), "Set upstream").click();
+  await button(history, "Compare upstream").click();
+  assert.equal(await history.getByRole("combobox", { name: "Target revision", exact: true }).inputValue(), "refs/remotes/origin/topic");
+  await button(history, "Synchronize repository").click();
+  await button(history, "Upstream").click();
+  await button(history, "Pull by merge").click();
+  await button(page.getByRole("dialog", { name: "Pull by merge", exact: true }), "Pull by merge").click();
+  await history.getByText("refs/remotes/origin/topic", { exact: false }).waitFor();
+  await button(history, "Create merge commit").waitFor();
+  await button(history, "Synchronize repository").click();
+  await button(history, "Upstream").click();
+  await button(history, "Pull by rebase").click();
+  await button(page.getByRole("dialog", { name: "Pull by rebase", exact: true }), "Pull by rebase").click();
+  assert.equal(await history.getByRole("combobox", { name: "History action", exact: true }).inputValue(), "rebase");
+  assert.equal(await history.getByRole("combobox", { name: "Rebase base", exact: true }).inputValue(), "refs/remotes/origin/topic");
+  await button(history, "Synchronize repository").click();
+  await button(history, "Remote references").click();
+  await history.getByRole("combobox", { name: "Reference action", exact: true }).selectOption("deleteTag");
+  await history.getByRole("textbox", { name: "Remote tag name", exact: true }).fill("v1");
+  await button(history, "Review changes").click();
+  const deleteTag = page.getByRole("dialog", { name: "Delete remote tag", exact: true });
+  await deleteTag.getByText("refs/tags/v1", { exact: true }).waitFor();
+  await deleteTag.getByText("b".repeat(40), { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitTransfer), undefined);
+  await button(deleteTag, "Delete remote tag").click();
+  await history.getByLabel("Git output", { exact: true }).filter({ hasText: "Updated reviewed reference" }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitTransfer.destination), "refs/tags/v1");
   await button(branches, "Changes").click();
   const changes = page.getByRole("region", { name: "Changes", exact: true });
   const preview = page.getByRole("region", { name: "Change preview", exact: true });
@@ -280,6 +693,62 @@ try {
   assert.deepEqual(await page.evaluate(() => window.gitCommitted),
     { message: "Review two files", ref: "refs/heads/main", paths: ["new ł.txt", "note.txt"] });
   await changeFilter.fill("");
+  await page.evaluate(() => { window.gitExtraChanges = true; });
+  await button(changes, "Refresh").click();
+  await edited.click();
+  await button(preview, "Stage hunk…").click();
+  const hunks = page.getByRole("dialog", { name: "Review text hunks", exact: true });
+  await hunks.getByRole("combobox", { name: "Hunk", exact: true }).selectOption("1");
+  await hunks.getByLabel("Inline diff", { exact: true }).filter({ hasText: "+second hunk" }).waitFor();
+  await button(hunks, "Stage this hunk").click();
+  await page.waitForFunction(() => window.gitStagedHunk?.index === 1);
+  assert.deepEqual(await page.evaluate(() => window.gitStagedHunk), { path: "note.txt", index: 1 });
+  await button(changes, "Select files…").click();
+  const selectFiles = page.getByRole("dialog", { name: "Select changed files", exact: true });
+  await selectFiles.getByRole("checkbox", { name: "note.txt", exact: true }).check();
+  await selectFiles.getByRole("checkbox", { name: "bulk.txt", exact: true }).check();
+  await button(selectFiles, "Review changes").click();
+  const bulk = page.getByRole("dialog", { name: "Stage selected files", exact: true });
+  await bulk.getByText("bulk.txt", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitBulk), undefined);
+  await button(bulk, "Stage selected files").click();
+  await page.waitForFunction(() => window.gitBulk?.length === 2);
+  assert.deepEqual((await page.evaluate(() => window.gitBulk)).sort(), ["bulk.txt", "note.txt"]);
+  await edited.click();
+  await button(preview, "Discard…").click();
+  const discard = page.getByRole("dialog", { name: "Discard working change", exact: true });
+  await discard.getByLabel("Inline diff", { exact: true }).filter({ hasText: "+discard preview" }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitDiscarded), undefined);
+  await button(discard, "Discard working change").click();
+  await page.waitForFunction(() => window.gitDiscarded === "note.txt");
+  await button(changes, "Amend…").click();
+  const amend = page.getByRole("dialog", { name: "Amend current commit", exact: true });
+  const amendMessage = amend.getByRole("textbox", { name: "Commit message", exact: true });
+  assert.match(await amendMessage.inputValue(), /Full commit body/);
+  await amendMessage.fill("Amend the reviewed commit");
+  await button(amend, "Amend commit").click();
+  await changes.getByText("Amended commit abcdef1.", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitAmended), "Amend the reviewed commit");
+  await button(changes, "Stashes…").click();
+  const stashes = page.getByRole("dialog", { name: "Git stashes", exact: true });
+  await stashes.getByRole("textbox", { name: "Stash message", exact: true }).fill("Fixture stash");
+  await stashes.getByRole("checkbox", { name: "Include untracked files", exact: true }).check();
+  await button(stashes, "Create stash").click();
+  await stashes.getByLabel("Stash diff", { exact: true }).filter({ hasText: "+saved stash diff" }).waitFor();
+  await button(stashes, "Staged").click();
+  await stashes.getByLabel("Stash diff", { exact: true }).filter({ hasText: "+saved staged version" }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.gitStashCreated), { message: "Fixture stash", untracked: true });
+  await button(stashes, "Apply stash").click();
+  const apply = page.getByRole("dialog", { name: "Apply stash", exact: true });
+  await button(apply, "Apply stash").click();
+  await stashes.getByText("stash-conflict.txt", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitStashAction.restoreIndex), true);
+  await button(stashes, "Drop stash").click();
+  const drop = page.getByRole("dialog", { name: "Drop stash", exact: true });
+  assert.equal(await page.evaluate(() => window.gitStashAction.action), "apply");
+  await button(drop, "Drop stash").click();
+  await stashes.getByText("No stashes.", { exact: true }).waitFor();
+  await button(stashes, "Close").click();
   await page.evaluate(() => { window.workingClean = true; });
   await button(changes, "Refresh").click();
   await changes.getByText("Working tree is clean.").waitFor();
