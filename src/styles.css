@@ -1469,7 +1469,9 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .user-menu-list [role="option"][aria-disabled="true"] { color: var(--muted); cursor: default; }
 .user-menu-list [role="option"] span + span { flex: none; }
 .user-menu-list hr { margin: 4px 10px; border: 0; border-top: 1px solid var(--line); }
-.user-menu-list p { padding: 10px; color: var(--muted); }
+.user-menu-empty { display: grid; justify-items: start; align-content: start; gap: 8px; padding: 12px 0; }
+.user-menu-empty p { color: var(--muted); }
+.user-menu-empty .primary { margin-block-start: 3px; }
 .user-menu-tools { display: flex; flex-wrap: wrap; gap: 6px; }
 .user-menu-prompt { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr)); gap: 6px; align-items: end; }
 @media (max-width: 560px) {

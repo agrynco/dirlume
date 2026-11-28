@@ -82,17 +82,28 @@ try {
   await button("Close terminal").click();
   await openMenu();
   await page.getByRole("combobox", { name: "Menu source" }).selectOption({ label: "Personal menu" });
-  await button("New command").click();
+  const emptyMenu = page.getByRole("dialog", { name: "User Menu", exact: true });
+  await emptyMenu.getByText("No saved commands", { exact: true }).waitFor();
+  assert.equal(await list().count(), 0);
+  assert.equal(await emptyMenu.getByRole("checkbox", { name: "Show hidden entries" }).count(), 0);
+  assert.equal(await emptyMenu.getByText("/profile/user-menu.json", { exact: true }).count(), 0);
+  const create = button("New command");
+  assert.equal(await create.evaluate((element) => document.activeElement === element && element.classList.contains("primary")), true);
+  assert.ok(await emptyMenu.locator(".dialog-body").evaluate((element) => parseFloat(getComputedStyle(element).paddingInlineStart) >= 12));
+  await page.setViewportSize({ width: 400, height: 330 });
+  await create.press("Enter");
+  await page.getByRole("dialog", { name: "Add menu entry", exact: true }).waitFor();
   await page.getByRole("textbox", { name: "Label", exact: true }).fill("Personal command");
   await page.getByRole("textbox", { name: "Shell steps, one per line" }).fill("echo hello");
   await button("Apply").click();
+  await page.getByText("/profile/user-menu.json", { exact: true }).waitFor();
   await button("Save menu").click();
   await page.getByRole("alert").filter({ hasText: "The menu definition changed on disk" }).waitFor();
   await page.getByRole("option", { name: "Personal command" }).waitFor();
   await button("Save menu").click();
   await page.waitForFunction(() => window.menuFixture.saves.length === 2);
   assert.equal(await page.evaluate(() => window.menuFixture.saves[1].entries[0].label), "Personal command");
-  console.log("Verified folder review, scoped hotkeys, visibility, parameter cancellation, captured arguments, and draft retention after a failed save.");
+  console.log("Verified the empty menu, initial action focus, small-window editor, folder review, hotkeys, parameters, and draft retention after a failed save.");
 } finally {
   await browser.close();
 }
