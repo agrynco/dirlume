@@ -299,6 +299,17 @@ pub struct BisectState {
     concluded: bool,
 }
 
+fn bisect_concluded(log: &str) -> bool {
+    log.lines().any(|line| {
+        line == "# only skipped commits left to test"
+            || line
+                .strip_prefix("# first ")
+                .and_then(|result| result.split_once(" commit: ["))
+                .and_then(|(_, object)| object.split_once(']'))
+                .is_some_and(|(hash, _)| oid(hash).is_ok())
+    })
+}
+
 fn bisect_state(git: &Path, root: &Path) -> WriteResult<Option<BisectState>> {
     merge::verify_worktree(git, root)?;
     let start = match fs::read_to_string(writes::git_path(git, root, "BISECT_START")?) {
@@ -321,9 +332,7 @@ fn bisect_state(git: &Path, root: &Path) -> WriteResult<Option<BisectState>> {
     oid(&head)?;
     let log = bounded(git, root, &["bisect", "log"], STATUS_LIMIT)?.ok_or(GitError::Unreadable)?;
     let log = String::from_utf8_lossy(&log).into_owned();
-    let concluded = log.lines().any(|line| {
-        line.starts_with("# first bad commit:") || line.starts_with("# only skipped commits left")
-    });
+    let concluded = bisect_concluded(&log);
     Ok(Some(BisectState {
         start,
         head,
@@ -467,6 +476,21 @@ pub async fn git_update_bisect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognizes_bisect_results_with_quoted_and_custom_terms() {
+        let hash = "a".repeat(40);
+        for term in ["bad", "'bad'", "'broken'"] {
+            assert!(bisect_concluded(&format!(
+                "# first {term} commit: [{hash}] Fixture"
+            )));
+        }
+        assert!(bisect_concluded("# only skipped commits left to test"));
+        assert!(!bisect_concluded(&format!(
+            "# bad: [{hash}] first bad commit"
+        )));
+        assert!(!bisect_concluded("# first bad commit: [missing]"));
+    }
 
     fn initialize(root: &Path) {
         let cli = |args: &[&str]| super::super::tests::git(root, args);
