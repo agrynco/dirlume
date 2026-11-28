@@ -1,10 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { helpIsOpen } from "./contextHelp";
+import type { HelpTopic } from "./helpTopics";
 import { t } from "./i18n";
 
-export function FileContextMenu({ x, y, label = "File actions", onClose, onReturn, children }: {
+export function FileContextMenu({ x, y, label = "File actions", helpTopic = "operations", container = document.body, onClose, onReturn, children }: {
   label?: string;
+  helpTopic?: HelpTopic;
+  container?: HTMLElement;
   x: number; y: number; onClose: () => void; onReturn: () => void; children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -16,7 +19,7 @@ export function FileContextMenu({ x, y, label = "File actions", onClose, onRetur
     if (!menu) return;
     menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 4))}px`;
     menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - menu.offsetHeight - 4))}px`;
-    menu.querySelector<HTMLButtonElement>("button:enabled")?.focus({ preventScroll: true });
+    (menu.querySelector<HTMLButtonElement>("button:enabled") ?? menu).focus({ preventScroll: true });
   }, [x, y]);
 
   useEffect(() => {
@@ -34,7 +37,7 @@ export function FileContextMenu({ x, y, label = "File actions", onClose, onRetur
     };
   }, []);
 
-  return createPortal(<div ref={ref} className="file-column-menu" role="menu" data-help-topic="operations" aria-label={t(label)}
+  return createPortal(<div ref={ref} className="file-column-menu" role="menu" tabIndex={-1} data-help-topic={helpTopic} aria-label={t(label)}
     onContextMenu={(event) => event.preventDefault()}
     onBlur={(event) => { if (!helpIsOpen() && !event.currentTarget.contains(event.relatedTarget)) onClose(); }}
     onKeyDown={(event) => {
@@ -53,5 +56,5 @@ export function FileContextMenu({ x, y, label = "File actions", onClose, onRetur
       const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 :
         (index + (event.key === "ArrowUp" ? -1 : 1) + items.length) % items.length;
       items[next]?.focus();
-    }}>{children}</div>, document.body);
+    }}>{children}</div>, container);
 }

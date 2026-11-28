@@ -1002,12 +1002,22 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-index-summary button { margin-inline-start: auto; }
 .git-index-summary button + button { margin-inline-start: 0; }
 .git-bulk-list, .git-stash-create { display: grid; gap: 7px; }
+.git-stash-list { max-height: 12rem; margin: 8px 0; padding: 0; overflow: auto; list-style: none; }
+.git-stash-list > li > button { width: 100%; justify-content: flex-start; white-space: normal; overflow-wrap: anywhere; }
 .git-bulk-list { max-block-size: 18rem; overflow: auto; padding: 3px; }
 .git-stash-create { margin-block-end: 10px; }
 .git-write-feedback { margin: 4px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .git-filter { min-width: 0; margin: 6px 7px; }
 .git-scroll { flex: 1; min-height: 0; overflow: auto; padding-block: 2px; }
 .git-branch-actions { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px 8px; }
+.git-pane button.git-action, .dialog button.git-action {
+  min-height: 28px; max-width: 100%; border-color: var(--line); white-space: normal; overflow-wrap: anywhere;
+  background: var(--raised); text-align: start; font-family: var(--ui-font);
+}
+.git-pane button.git-action:hover:not(:disabled), .dialog button.git-action:hover:not(:disabled) { background: var(--hover); }
+.git-pane button.git-action[aria-pressed="true"], .dialog button.git-action[aria-pressed="true"] { border-color: var(--accent); background: var(--active-row); }
+.git-pane button.git-action.negative, .dialog button.git-action.negative { background: var(--danger-bg); }
+.file-column-menu[data-help-topic="gitView"] button { text-align: start; white-space: normal; overflow-wrap: anywhere; }
 .git-history-heading { flex-wrap: wrap; }
 .git-history-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .git-revision-comparison { display: grid; align-content: start; gap: 10px; padding: 8px; }
@@ -1022,6 +1032,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-rebase-list > li { padding: 6px 0; border-block-end: 1px solid var(--line); }
 .git-rebase-list p { margin: 0 0 4px; }
 .git-rebase-list .git-branch-actions { padding-inline: 0; }
+.git-revision-comparison .git-worktrees { padding-inline-start: 0; list-style: none; }
 .git-branch-group { margin-block-end: 5px; }
 .git-branch-group h3, .git-details h3 { margin: 0; padding: 4px 8px; color: var(--panel-muted); font: 600 .88em/1.4 var(--ui-font); }
 .git-branch-group button, .git-commit > button {
@@ -1041,7 +1052,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-commit > button strong { overflow: hidden; text-overflow: ellipsis; }
 .git-commit > button code, .git-details code { font-family: var(--text-font); }
 .git-details { padding: 5px 8px; background: var(--raised); }
-.git-details header { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+.git-details header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 5px; }
 .git-details pre { margin-block: 6px; padding: 6px; background: var(--panel-bg); white-space: pre-wrap; overflow-wrap: anywhere; }
 .git-details :is(p, ul) { margin: 3px 0; }
 .git-details ul { padding: 0; list-style: none; }

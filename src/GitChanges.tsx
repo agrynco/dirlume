@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { FileDiff } from "lucide-react";
+import { Archive, ArrowDownToLine, ArrowUpFromLine, Eye, FileDiff, GitCommitHorizontal, ListChecks, Pencil, Scissors, Trash2 } from "lucide-react";
 import { api, type GitBulkPlan, type GitChangeGroup, type GitDiscardPlan, type GitHunkPlan, type GitIndexAction, type GitIndexSnapshot, type GitWorkingChange, type GitWorkingDiff,
   type GitWorkingIndex, type NamedFile } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
+import { GitActionButtons, useGitMenu, type GitAction } from "./GitActions";
 import { bookmarkFile } from "./fileBookmarks";
 import { GitStashes } from "./GitStashes";
 import { writeError, writeErrors, writeFailure } from "./gitWriteError";
@@ -27,13 +28,14 @@ const fallbacks: Record<NonNullable<GitWorkingDiff["fallback"]>, string> = {
 const changeId = ({ group, path }: GitWorkingChange) => JSON.stringify([group, path]);
 const changeLabel = ({ path, previousPath }: GitWorkingChange) => previousPath ? previousPath + " → " + path : path;
 
-function Preview({ root, change, onOpen, canEdit, actions }: {
+function Preview({ root, change, actions, fileActions, unavailable }: {
   root: string;
   change: GitWorkingChange;
-  onOpen?: (file: NamedFile, editing: boolean) => void;
-  canEdit?: (file: NamedFile) => boolean;
-  actions?: ReactNode;
+  actions?: GitAction[];
+  fileActions?: (diff: GitWorkingDiff) => GitAction[];
+  unavailable?: boolean;
 }) {
+  const menu = useGitMenu();
   const [diff, setDiff] = useState<GitWorkingDiff | null>(null);
   const [error, setError] = useState(false);
   useEffect(() => {
@@ -42,25 +44,22 @@ function Preview({ root, change, onOpen, canEdit, actions }: {
       () => { if (!canceled) setError(true); });
     return () => { canceled = true; };
   }, [root, change]);
-  const file = diff?.workingPath ? bookmarkFile(diff.workingPath) : null;
+  const commands = [...(actions ?? []), ...(diff && fileActions ? fileActions(diff) : [])];
   const comparison = change.group === "staged" ? diff?.unborn ? "Empty tree → Index" : "HEAD → Index" :
     change.group === "unstaged" ? "Index → Working file" : "New working file";
   return <>
-    <div className="git-change-summary">
+    <div className="git-change-summary" {...menu(commands, changeLabel(change))}>
       <strong>{changeLabel(change)}</strong>
       <span>{t(comparison)}</span>
       <div className="git-change-actions">
-        {actions}
-        {file && onOpen && (diff?.workingText || imageType(file.name)) && <>
-          <Button onClick={() => onOpen(file, false)}>{t("Open in Viewer")}</Button>
-          {canEdit?.(file) && <Button onClick={() => onOpen(file, true)}>{t("Open in Editor")}</Button>}
-        </>}
+        {unavailable && <span>{t(writeErrors.unsupportedChange)}</span>}
+        <GitActionButtons actions={commands} />
       </div>
     </div>
     {error ? <p className="pane-empty git-error" role="alert">{t("Could not read this change.")}</p> :
       !diff ? <p className="pane-empty" role="status">{t("Reading change…")}</p> :
       diff.fallback ? <p className="pane-empty">{t(fallbacks[diff.fallback])}</p> :
-      <pre className="git-patch" tabIndex={0} aria-label={t("Inline diff")}><code>
+      <pre className="git-patch" tabIndex={0} aria-label={t("Inline diff")} {...menu(commands, changeLabel(change))}><code>
         {(diff.patch ?? "").match(/[^\n]*\n|[^\n]+$/g)?.map((line, index) =>
           <span key={index} data-diff={line.startsWith("+") && !line.startsWith("+++") ? "added" :
             line.startsWith("-") && !line.startsWith("---") ? "removed" : undefined}>{line}</span>)}
@@ -130,7 +129,7 @@ function BulkSelection({ root, index, onClose, onRefresh }: {
   </Dialog>;
 }
 
-export function GitChanges({ side, root, refresh, selected, onSelect, header, repository, onOpen, canEdit, onRefresh,
+export function GitChanges({ side, root, refresh, selected, onSelect, header, paneActions, repository, onOpen, canEdit, onRefresh,
   draft, onDraft }: {
   side: Side;
   root: string;
@@ -138,6 +137,7 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, re
   selected: string;
   onSelect: (id: string) => void;
   header: ReactNode;
+  paneActions: GitAction[];
   repository: ReactNode;
   onOpen: (file: NamedFile, editing: boolean) => void;
   canEdit: (file: NamedFile) => boolean;
@@ -145,6 +145,7 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, re
   draft: string;
   onDraft: (message: string) => void;
 }) {
+  const menu = useGitMenu();
   const [filter, setFilter] = useState("");
   const [result, setResult] = useState<{ refresh: number; index: GitWorkingIndex | null }>();
   const [pending, setPending] = useState<GitIndexAction | "commit" | "review">();
@@ -309,22 +310,69 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, re
     event.preventDefault();
     list.current?.querySelectorAll<HTMLElement>("[role=option]")[Math.max(0, Math.min(next, visible.length - 1))]?.focus();
   }
+  function changeCommands(target: GitWorkingChange): GitAction[] {
+    if (!index || index.submodules.includes(target.path)) return [];
+    const { snapshot } = index;
+    const disabled = !!pending || index.writeBlocked;
+    const unstaging = target.group === "staged";
+    const commands: GitAction[] = [{
+      label: unstaging ? "Unstage" : "Stage", icon: unstaging ? ArrowUpFromLine : ArrowDownToLine, disabled,
+      run: () => {
+        if (!unstaging && staged.some((row) => row.path === target.path || target.previousPath && row.path === target.previousPath)) {
+          setReplacement({ change: target, snapshot });
+        } else void changeIndex(target, snapshot, unstaging ? "unstage" : "stage", false);
+      },
+    }];
+    if (target.group !== "untracked" && target.status === "M") commands.push({
+      label: unstaging ? "Unstage hunk…" : "Stage hunk…", icon: Scissors, disabled,
+      run: () => startPatchReview("hunks", target, snapshot),
+    });
+    if (!unstaging && !["R", "C", "U"].includes(target.status)) commands.push({
+      label: "Discard…", icon: Trash2, disabled, destructive: true, run: () => startPatchReview("discard", target, snapshot),
+    });
+    return commands;
+  }
+  function documentCommands(target: GitWorkingChange, preview?: GitWorkingDiff): GitAction[] {
+    const file = preview?.workingPath ? bookmarkFile(preview.workingPath) : null;
+    if (target.status === "D" || index?.submodules.includes(target.path) ||
+        preview && (!file || !preview.workingText && !imageType(file.name))) return [];
+    return [false, true].filter((editing) => !editing || !file || canEdit(file)).map((editing) => ({
+      label: editing ? "Open in Editor" : "Open in Viewer", icon: editing ? Pencil : Eye,
+      run: () => {
+        if (file) {
+          onOpen(file, editing);
+          return;
+        }
+        function unavailable() {
+          if (mounted.current) setFeedback({ error: true, message: t("Could not open the working file.") });
+        }
+        void api.gitWorkingDiff(root, target).then((diff) => {
+          if (!mounted.current) return;
+          const working = diff.workingPath ? bookmarkFile(diff.workingPath) : null;
+          if (working && (diff.workingText || imageType(working.name)) && (!editing || canEdit(working))) onOpen(working, editing);
+          else unavailable();
+        }, unavailable);
+      },
+    }));
+  }
+  const indexActions: GitAction[] = index ? [
+    { label: "Commit…", icon: GitCommitHorizontal, disabled: !staged.length || !branchName || index.writeBlocked || !!pending,
+      run: () => { setReview({ changes: staged, snapshot: index.snapshot }); setReviewPath(""); } },
+    { label: "Amend…", icon: Pencil, disabled: !index.snapshot.head || !branchName || index.writeBlocked || !!pending,
+      run: () => startAmend(index) },
+    { label: "Select files…", icon: ListChecks, disabled: !rows?.length || index.writeBlocked || !!pending, run: () => setBulk(index) },
+    { label: "Stashes…", icon: Archive, disabled: !!pending, run: () => setStash(true) },
+  ] : [];
   return <>
-    <section className={"pane git-pane git-pane-" + side} aria-label={t("Changes")} data-help-topic="gitView" data-pane-side={side}>
+    <section className={"pane git-pane git-pane-" + side} aria-label={t("Changes")} data-help-topic="gitView" data-pane-side={side}
+      tabIndex={-1} {...menu([...indexActions, ...paneActions])}>
       {header}
       {repository}
       {index && <div className="git-index-summary">
         <span title={branchName}>{branchName ? index.snapshot.head ? t("Branch {0}", branchName) :
           t("Branch {0} has no commits yet.", branchName) : t("Detached HEAD")}</span>
         <span>{t("Staged files: {0}", staged.length)}</span>
-        <Button disabled={!staged.length || !branchName || index.writeBlocked || !!pending} onClick={() => {
-          setReview({ changes: staged, snapshot: index.snapshot });
-          setReviewPath("");
-        }}>{t("Commit…")}</Button>
-        <Button disabled={!index.snapshot.head || !branchName || index.writeBlocked || !!pending}
-          onClick={() => startAmend(index)}>{t("Amend…")}</Button>
-        <Button disabled={!rows?.length || index.writeBlocked || !!pending} onClick={() => setBulk(index)}>{t("Select files…")}</Button>
-        <Button disabled={!!pending} onClick={() => setStash(true)}>{t("Stashes…")}</Button>
+        <GitActionButtons actions={indexActions} />
       </div>}
       {index?.writeBlocked && <p className="git-write-feedback">{t(writeErrors.operationInProgress)}</p>}
       {index && !branchName && <p className="git-write-feedback">{t(writeErrors.detached)}</p>}
@@ -352,7 +400,10 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, re
               const label = changeLabel(row);
               return <Button role="option" key={id} aria-selected={current === id} tabIndex={current === id ? 0 : -1}
                 data-git-path={row.path}
-                onFocus={() => onSelect(id)} onClick={() => onSelect(id)}>
+                onFocus={() => onSelect(id)} onClick={() => onSelect(id)} {...menu([
+                  { label: "Show change", icon: FileDiff, run: () => onSelect(id) },
+                  ...changeCommands(row), ...documentCommands(row),
+                ], t(groupLabels[group]) + " · " + label)}>
                 <span title={label}>{label}</span><small>{t(statusLabels[row.status] ?? row.status)}</small>
               </Button>;
             })}
@@ -360,27 +411,12 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, re
         </div>}
     </section>
     <section className={"pane git-pane git-pane-" + opposite(side)} aria-label={t("Change preview")}
-      data-help-topic="gitView" data-pane-side={opposite(side)}>
+      data-help-topic="gitView" data-pane-side={opposite(side)} tabIndex={-1} {...menu([
+        ...(change ? [...changeCommands(change), ...documentCommands(change)] : []), ...indexActions,
+      ])}>
       <header className="pane-heading"><span className="pane-title"><FileDiff aria-hidden="true" />{t("Change preview")}</span></header>
-      {change && index && <Preview key={JSON.stringify([root, refresh, current])} root={root} change={change} onOpen={onOpen} canEdit={canEdit}
-        actions={isSubmodule ? <span>{t(writeErrors.unsupportedChange)}</span> : <><Button
-          disabled={!!pending || index.writeBlocked} onClick={() => {
-            if (change.group !== "staged" && staged.some((row) => row.path === change.path ||
-              change.previousPath && row.path === change.previousPath)) {
-              setReplacement({ change, snapshot: index.snapshot });
-            } else void changeIndex(change, index.snapshot, change.group === "staged" ? "unstage" : "stage", false);
-          }}>
-          {t(change.group === "staged" ? "Unstage" : "Stage")}
-        </Button>
-          {change.group !== "untracked" && change.status === "M" &&
-            <Button disabled={!!pending || index.writeBlocked} onClick={() => startPatchReview("hunks", change, index.snapshot)}>
-              {t(change.group === "staged" ? "Unstage hunk…" : "Stage hunk…")}
-            </Button>}
-          {change.group !== "staged" && !["R", "C", "U"].includes(change.status) &&
-            <Button disabled={!!pending || index.writeBlocked} onClick={() => startPatchReview("discard", change, index.snapshot)}>
-              {t("Discard…")}
-            </Button>}
-        </>} />}
+      {change && index && <Preview key={JSON.stringify([root, refresh, current])} root={root} change={change}
+        unavailable={isSubmodule} actions={changeCommands(change)} fileActions={(diff) => documentCommands(change, diff)} />}
     </section>
     {replacement && <Dialog title={t("Replace staged changes?")} helpTopic="gitView" onClose={() => setReplacement(undefined)}
       footer={<>

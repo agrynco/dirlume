@@ -1,17 +1,21 @@
 import { useEffect, useState } from "react";
+import { Archive, ArrowDownToLine, ArrowUpFromLine, Eye, Layers, Trash2 } from "lucide-react";
 import { api, type GitStashAction, type GitStashEntry, type GitStashPreview, type GitWorkingIndex } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
+import { GitActionButtons, useGitMenu, type GitAction } from "./GitActions";
 import { writeError } from "./gitWriteError";
 import { t } from "./i18n";
 
 const actions: Record<GitStashAction, string> = { apply: "Apply stash", pop: "Pop stash", drop: "Drop stash" };
+const icons = { apply: ArrowDownToLine, pop: ArrowUpFromLine, drop: Trash2 };
 const versions = { combined: "All stash changes", staged: "Staged", working: "Unstaged" } as const;
 const stashId = (entry: GitStashEntry) => entry.position + ":" + entry.hash;
 
 export function GitStashes({ root, index, refresh, onRefresh, onClose }: {
   root: string; index?: GitWorkingIndex | null; refresh: number; onRefresh: () => void; onClose: () => void;
 }) {
+  const menu = useGitMenu();
   const [entries, setEntries] = useState<GitStashEntry[]>();
   const [selected, setSelected] = useState("");
   const [message, setMessage] = useState("");
@@ -71,8 +75,21 @@ export function GitStashes({ root, index, refresh, onRefresh, onClose }: {
 
   const canCreate = index?.snapshot.head && !index.writeBlocked && index.changes
     .some(({ group }) => group !== "untracked" || untracked);
+  const create: GitAction = { label: "Create stash", icon: Archive, submit: true, disabled: !canCreate || pending || !!review,
+    run: () => void update() };
+  function entryActions(target: GitStashEntry): GitAction[] {
+    return (Object.keys(actions) as GitStashAction[]).map((action) => ({
+      label: actions[action], icon: icons[action], disabled: pending || !index || index.writeBlocked && action !== "drop",
+      destructive: action === "drop",
+      run: () => { setSelected(stashId(target)); setReview({ entry: target, action }); },
+    }));
+  }
+  const versionActions = (Object.keys(versions) as (keyof GitStashPreview)[]).map((name) => ({
+    label: versions[name], icon: Layers, pressed: version === name, run: () => setVersion(name),
+  }));
   return <Dialog title={t("Git stashes")} helpTopic="gitView" wide onClose={pending ? undefined : onClose}
     footer={<Button onClick={onClose} disabled={pending}>{t("Close")}</Button>}>
+    <div className="dialog-body" tabIndex={-1} {...menu([create, ...(entry ? [...versionActions, ...entryActions(entry)] : [])])}>
     <p><code>{root}</code></p>
     <form className="git-stash-create" onSubmit={(event) => { event.preventDefault(); void update(); }}>
       <label className="field">{t("Stash message")}
@@ -80,7 +97,7 @@ export function GitStashes({ root, index, refresh, onRefresh, onClose }: {
       </label>
       <label className="field-checkbox"><input type="checkbox" checked={untracked} disabled={pending}
         onChange={(event) => setUntracked(event.target.checked)} />{t("Include untracked files")}</label>
-      <Button type="submit" disabled={!canCreate || pending || !!review}>{t("Create stash")}</Button>
+      <GitActionButtons actions={[create]} />
     </form>
     {error && <p role="alert">{error}</p>}
     {feedback && <p role="status">{feedback}</p>}
@@ -88,17 +105,17 @@ export function GitStashes({ root, index, refresh, onRefresh, onClose }: {
       <ul>{conflicts.map((path) => <li key={path}>{path}</li>)}</ul>
     </div>}
     {!entries ? <p role="status">{t("Reading stashes…")}</p> : entries.length ? <>
-      <label className="field">{t("Stash")}
-        <select value={entry ? stashId(entry) : ""} disabled={pending} onChange={(event) => setSelected(event.target.value)}>
-          {entries.map((value) => <option key={stashId(value)} value={stashId(value)}>
+      <ul className="git-rebase-list git-stash-list" aria-label={t("Stashes")}>
+        {entries.map((value) => <li key={stashId(value)}>
+          <Button aria-pressed={entry === value} disabled={pending} onClick={() => setSelected(stashId(value))}
+            {...menu([{ label: "Preview stash", icon: Eye, run: () => setSelected(stashId(value)) }, ...entryActions(value)], value.subject)}>
             {"stash@{" + value.position + "} · " + value.subject}
-          </option>)}
-        </select>
-      </label>
+          </Button>
+        </li>)}
+      </ul>
       {entry && <>
         <div className="git-branch-actions">
-          {(Object.keys(versions) as (keyof GitStashPreview)[]).map((name) =>
-            <Button key={name} aria-pressed={version === name} onClick={() => setVersion(name)}>{t(versions[name])}</Button>)}
+          <GitActionButtons actions={versionActions} />
         </div>
         {previewError ? <p role="alert">{previewError}</p> : !diff ? <p role="status">{t("Reading change…")}</p> :
           diff.patch ? <pre className="git-patch" tabIndex={0} aria-label={t("Stash diff")}>{diff.patch}</pre> :
@@ -106,21 +123,24 @@ export function GitStashes({ root, index, refresh, onRefresh, onClose }: {
         <label className="field-checkbox"><input type="checkbox" checked={restoreIndex} disabled={pending}
           onChange={(event) => setRestoreIndex(event.target.checked)} />{t("Restore staged changes to the index")}</label>
         <div className="git-branch-actions">
-          {(Object.keys(actions) as GitStashAction[]).map((action) =>
-            <Button key={action} disabled={pending || !index || index.writeBlocked && action !== "drop"}
-              onClick={() => setReview({ entry, action })}>{t(actions[action])}</Button>)}
+          <GitActionButtons actions={entryActions(entry)} />
         </div>
       </>}
     </> : <p>{t("No stashes.")}</p>}
+    </div>
     {review && <Dialog title={t(actions[review.action])} helpTopic="gitView"
       onClose={pending ? undefined : () => setReview(undefined)} footer={<>
-        <Button disabled={pending} onClick={() => setReview(undefined)}>{t("Cancel")}</Button>
-        <Button disabled={pending || !index} onClick={() => void update()}>{t(actions[review.action])}</Button>
+        <Button disabled={pending} data-initial-focus={review.action === "drop" || undefined}
+          onClick={() => setReview(undefined)}>{t("Cancel")}</Button>
+        <Button disabled={pending || !index} className={review.action === "drop" ? "negative" : undefined}
+          onClick={() => void update()}>{t(actions[review.action])}</Button>
       </>}>
-      <p><code>{root}</code></p>
-      <p><code>{review.entry.hash.slice(0, 12)}</code> {review.entry.subject}</p>
-      {review.action === "drop" && <p>{t("Remove this stash from the list.")}</p>}
-      {review.action === "pop" && <p>{t("Remove this stash after applying it successfully.")}</p>}
+      <div className="dialog-body git-tools-review">
+        <p><code>{root}</code></p>
+        <p><code>{review.entry.hash.slice(0, 12)}</code> {review.entry.subject}</p>
+        {review.action === "drop" && <p>{t("Remove this stash from the list.")}</p>}
+        {review.action === "pop" && <p>{t("Remove this stash after applying it successfully.")}</p>}
+      </div>
     </Dialog>}
   </Dialog>;
 }

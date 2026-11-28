@@ -3958,7 +3958,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         {gitView && <Suspense fallback={<section className={"pane git-pane git-pane-" + gitView.side}>
           <p className="pane-empty" role="status">{t("Reading Git repository…")}</p>
         </section>}>
-          <GitView key={gitView.path} side={gitView.side} path={gitView.path} refresh={gitRefresh}
+          <GitView key={gitView.path} side={gitView.side} path={gitView.path} refresh={gitRefresh} menuShortcut={shortcuts.gitContextMenu}
             onOpen={openDocument} canEdit={(file) => imageType(file.name) ? canEditImage(file) : writableTextPlace(file.place)}
             onOpenWorktree={(path) => setGitView((current) => current && { ...current, path })}
             onTerminal={openGitTerminal}

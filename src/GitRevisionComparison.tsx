@@ -1,6 +1,8 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { api, type GitComparison, type GitDetails, type GitHistory, type GitRepository, type GitRevisionDiff } from "./api";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Copy, FileClock, GitCompareArrows, Search } from "lucide-react";
+import { api, type GitCommit, type GitComparison, type GitDetails, type GitHistory, type GitRepository, type GitRevisionDiff } from "./api";
 import { Button } from "./Button";
+import { useGitMenu, type GitAction } from "./GitActions";
 import { t } from "./i18n";
 
 const fallbackLabels = {
@@ -13,8 +15,9 @@ const fallbackLabels = {
 function RevisionInput({ label, initial, repository }: { label: string; initial?: string; repository: GitRepository }) {
   const options = repository.branches.map(({ name, reference, tip }) => ({ name, reference, value: tip }));
   const tags = repository.tags ?? [];
-  const [kind, setKind] = useState(() => options.find(({ value, reference }) => value === initial || reference === initial)?.reference ??
-    (initial && initial === repository.head ? "HEAD" : ""));
+  const [kind, setKind] = useState(() => options.find(({ reference }) => reference === initial)?.reference ??
+    options.find(({ value }) => value === initial)?.reference ??
+    tags.find(({ reference }) => reference === initial)?.reference ?? (initial && initial === repository.head ? "HEAD" : ""));
   const value = options.find(({ reference }) => reference === kind)?.value ??
     (kind === "HEAD" ? repository.head ?? "" : kind);
   return <div>
@@ -37,12 +40,16 @@ function RevisionInput({ label, initial, repository }: { label: string; initial?
   </div>;
 }
 
-function UniqueCommits({ root, included, excluded, title, initial }: {
+function UniqueCommits({ root, included, excluded, title, initial, commitActions, renderDetails }: {
   root: string; included: string; excluded: string; title: string; initial: GitHistory;
+  commitActions: (commit: GitCommit, showDetails?: () => void) => GitAction[];
+  renderDetails: (commit: GitCommit) => ReactNode;
 }) {
+  const menu = useGitMenu();
   const [history, setHistory] = useState(initial);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState(false);
+  const [expanded, setExpanded] = useState<string>();
   async function loadMore() {
     if (history.nextOffset === null || working) return;
     setError(false);
@@ -59,22 +66,29 @@ function UniqueCommits({ root, included, excluded, title, initial }: {
   return <section aria-label={t(title)}>
     <h3>{t(title)}</h3>
     {history.commits.length > 0 ? <ul>{history.commits.map((commit) => <li key={commit.hash}>
-      <code title={commit.hash}>{commit.shortHash}</code> {commit.subject || t("No subject")}
+      <Button type="button" aria-expanded={expanded === commit.hash}
+        onClick={() => setExpanded(expanded === commit.hash ? undefined : commit.hash)}
+        {...menu(commitActions(commit, () => setExpanded(commit.hash)))}>
+        <code title={commit.hash}>{commit.shortHash}</code> {commit.subject || t("No subject")}
+      </Button>
+      {expanded === commit.hash && renderDetails(commit)}
     </li>)}</ul> : <p>{t("No unique commits.")}</p>}
     {error && <p role="alert">{t("Could not read the Git repository.")}</p>}
     {history.nextOffset !== null && <Button disabled={working} onClick={() => void loadMore()}>{t("Load more")}</Button>}
   </section>;
 }
 
-function Patch({ root, result, change }: { root: string; result: GitComparison; change: GitDetails["changes"][number] }) {
+export function GitRevisionPatch({ root, base, target, change }: {
+  root: string; base: string | null; target: string; change: GitDetails["changes"][number];
+}) {
   const [diff, setDiff] = useState<GitRevisionDiff | null>(null);
   const [error, setError] = useState(false);
   useEffect(() => {
     let canceled = false;
-    void api.gitRevisionDiff(root, result.base, result.target, change.path, change.previousPath)
+    void api.gitRevisionDiff(root, base, target, change.path, change.previousPath)
       .then((value) => { if (!canceled) setDiff(value); }, () => { if (!canceled) setError(true); });
     return () => { canceled = true; };
-  }, [root, result, change]);
+  }, [root, base, target, change]);
   if (error) return <p role="alert">{t("Could not read the Git repository.")}</p>;
   if (!diff) return <p role="status">{t("Reading change…")}</p>;
   if (diff.fallback) return <p>{t(fallbackLabels[diff.fallback])}</p>;
@@ -85,7 +99,14 @@ function Patch({ root, result, change }: { root: string; result: GitComparison; 
   </code></pre>;
 }
 
-export function GitRevisionComparison({ repository, target }: { repository: GitRepository; target?: string }) {
+export function GitRevisionComparison({ repository, target, commitActions, onInspectPath, renderDetails, onCopyPath }: {
+  repository: GitRepository; target?: string;
+  commitActions: (commit: GitCommit, showDetails?: () => void) => GitAction[];
+  onInspectPath: (target: { path: string; tip: string; mode: "history" | "blame" }) => void;
+  renderDetails: (commit: GitCommit) => ReactNode;
+  onCopyPath: (path: string) => void;
+}) {
+  const menu = useGitMenu();
   const [result, setResult] = useState<GitComparison | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
@@ -99,8 +120,9 @@ export function GitRevisionComparison({ repository, target }: { repository: GitR
     setResult(null);
     setSelected(null);
     try {
-      setResult(await api.gitCompareRevisions(repository.root, String(form.get("Base revision") ?? "").trim(),
-        String(form.get("Target revision") ?? "").trim()));
+      const result = await api.gitCompareRevisions(repository.root, String(form.get("Base revision") ?? "").trim(),
+        String(form.get("Target revision") ?? "").trim());
+      setResult(result);
     } catch {
       setError(true);
     } finally {
@@ -112,23 +134,32 @@ export function GitRevisionComparison({ repository, target }: { repository: GitR
     <form onSubmit={(event) => void compare(event)}>
       <RevisionInput label="Base revision" initial={repository.head ?? undefined} repository={repository} />
       <RevisionInput label="Target revision" initial={target ?? repository.head ?? undefined} repository={repository} />
-      <Button type="submit" disabled={working}>{t("Compare")}</Button>
+      <Button type="submit" className="git-action" disabled={working}><GitCompareArrows aria-hidden="true" />{t("Compare")}</Button>
     </form>
     {working && <p role="status">{t("Loading commits…")}</p>}
     {error && <p role="alert">{t("Could not compare these revisions. Check both commit IDs or select branches or tags.")}</p>}
     {result && <>
       <div className="git-revision-commits">
-        <UniqueCommits root={repository.root} included={result.base} excluded={result.target} title="Commits only in base" initial={result.baseOnly} />
-        <UniqueCommits root={repository.root} included={result.target} excluded={result.base} title="Commits only in target" initial={result.targetOnly} />
+        <UniqueCommits key={result.base + ":" + result.target} root={repository.root} included={result.base} excluded={result.target}
+          title="Commits only in base" initial={result.baseOnly} commitActions={commitActions} renderDetails={renderDetails} />
+        <UniqueCommits key={result.target + ":" + result.base + ":target"} root={repository.root} included={result.target} excluded={result.base}
+          title="Commits only in target" initial={result.targetOnly} commitActions={commitActions} renderDetails={renderDetails} />
       </div>
       <section aria-label={t("Changed paths")}>
         <h3>{t("Changed paths")}</h3>
         {result.changes.length > 0 ? <ul>{result.changes.map(({ status, path, previousPath }) => <li key={path}>
-          <Button aria-pressed={selected === path} onClick={() => setSelected(selected === path ? null : path)}>
+          <Button aria-pressed={selected === path} onClick={() => setSelected(selected === path ? null : path)} {...menu([
+            { label: "Show change", icon: GitCompareArrows, run: () => setSelected(path) },
+            { label: "File history", icon: FileClock, run: () => onInspectPath({ path,
+              tip: result.target, mode: "history" }) },
+            { label: "Show blame", icon: Search, run: () => onInspectPath({ path: status === "D" ? previousPath ?? path : path,
+              tip: status === "D" ? result.base : result.target, mode: "blame" }) },
+            { label: "Copy path", icon: Copy, run: () => onCopyPath(path) },
+          ])}>
             <code>{status}</code> {previousPath ? previousPath + " → " + path : path}
           </Button>
         </li>)}</ul> : <p>{t("No changed paths.")}</p>}
-        {diff && <Patch key={diff.path} root={repository.root} result={result} change={diff} />}
+        {diff && <GitRevisionPatch key={diff.path} root={repository.root} base={result.base} target={result.target} change={diff} />}
       </section>
     </>}
   </div>;

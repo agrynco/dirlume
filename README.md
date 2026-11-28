@@ -173,6 +173,8 @@ Use **F4** on a local single-frame PNG or JPEG to edit it, or **F6** to switch b
 
 With Git installed, choose **Git View** beside **Quick View** from a local repository folder. The active pane lists local and remote-tracking branches. The opposite pane shows the selected branch or detached HEAD history. Open a commit to see its message and changed paths, or select **Load more** to continue through older commits. For a merge, the changed paths are relative to the first parent. **Refresh** rereads local Git data. Toggle **Git View** again to resume file browsing. Configure the shortcut in **Options → Keyboard shortcuts**.
 
+Right-click an item in Git View to open its actions, or right-click a pane's background for pane commands. Command buttons show icons and tooltips. Use **Shift+F10** to open the menu for the focused item by default. Change or disable that binding in **Options → Keyboard shortcuts**.
+
 Choose **Compare revisions** in the history pane to compare two branches, tags, or full commit IDs. Each side lists its unique commits. Select a changed path for an inline diff from base to target. Comparing leaves the checkout, index, and working files intact.
 
 Open **Commit graph** for the selected branch and search commit messages. Open **File history** and enter a repository-relative path to see the file's commits or line authorship at that revision.
