@@ -70,6 +70,9 @@ try {
     const rightFiles = page.locator("#right-files");
     await left.getByText("local-main", { exact: true }).waitFor();
     const note = leftFiles.getByRole("option", { name: /note ł\.txt.*Staged: Modified.*Unstaged: Modified/ });
+    const marker = note.getByRole("button", { name: /Staged: Modified/ });
+    assert.deepEqual(await marker.locator("span").allTextContents(), ["SM", "WM"]);
+    assert.equal(await marker.evaluate((button) => button.scrollWidth <= button.clientWidth), true);
     await leftFiles.getByRole("option", { name: /folder.*Changes in this folder/ }).waitFor();
     for (const [name, status] of [["fresh", "Untracked"], ["added", "Staged: Added"], ["renamed", "Staged: Renamed"], ["conflict", "Unstaged: Conflict"]]) {
       await leftFiles.getByRole("option", { name: new RegExp(`^${name}\\.txt.*${status}`) }).waitFor();
@@ -82,7 +85,7 @@ try {
     await left.getByText("local-main", { exact: true }).waitFor();
     const menu = page.getByRole("menu", { name: "File actions", exact: true });
     const action = (name) => menu.getByRole("menuitem", { name, exact: true });
-    await note.getByRole("button", { name: /Staged: Modified/ }).click();
+    await marker.click();
     await action("Show diff").click();
     const diff = page.getByRole("dialog", { name: "Show diff", exact: true });
     await diff.locator(".diff-text").filter({ hasText: "Staged line" }).waitFor();
