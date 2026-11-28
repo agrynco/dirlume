@@ -1,4 +1,6 @@
-use super::{command, history_edits, line, merge, oid, repository, run, success, writes, GitError};
+use super::{
+    history_edits, line, merge, oid, repository, run, success, workspace, writes, GitError,
+};
 use serde::{Deserialize, Serialize};
 use std::{path::Path, process::Output};
 use writes::WriteError;
@@ -17,13 +19,13 @@ pub struct PushReview {
     url_digest: [u8; 32],
 }
 
-fn remotes(git: &Path, root: &Path) -> WriteResult<Vec<String>> {
+pub(super) fn remotes(git: &Path, root: &Path) -> WriteResult<Vec<String>> {
     merge::verify_worktree(git, root)?;
     let raw = line(success(run(git, root, &["remote"])?)?)?;
     Ok(raw.lines().map(str::to_owned).collect())
 }
 
-fn push_url(git: &Path, root: &Path, remote: &str) -> WriteResult<String> {
+pub(super) fn push_url(git: &Path, root: &Path, remote: &str) -> WriteResult<String> {
     if remote.starts_with('-') || !remotes(git, root)?.iter().any(|item| item == remote) {
         return Err(WriteError::Stale);
     }
@@ -45,7 +47,7 @@ fn push_url(git: &Path, root: &Path, remote: &str) -> WriteResult<String> {
     Ok(url.to_owned())
 }
 
-fn display_url(url: &str) -> String {
+pub(super) fn display_url(url: &str) -> String {
     let Ok(mut parsed) = reqwest::Url::parse(url) else {
         return url.to_owned();
     };
@@ -59,9 +61,7 @@ fn display_url(url: &str) -> String {
 }
 
 fn network(git: &Path, root: &Path, args: &[&str], url: &str) -> WriteResult<Output> {
-    let mut result = command(git, root, args)
-        .env("GIT_ALLOW_PROTOCOL", "file:git:http:https:ssh")
-        .output()?;
+    let mut result = workspace::transport(git, root, args)?;
     if !result.status.success() {
         result.stderr = String::from_utf8_lossy(&result.stderr)
             .replace(url, &display_url(url))

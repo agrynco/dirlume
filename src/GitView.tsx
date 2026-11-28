@@ -8,7 +8,9 @@ import { writeError } from "./gitWriteError";
 import { GitHistoryTools } from "./GitHistoryTools";
 import { GitMerge, gitOperationStatus } from "./GitMerge";
 import { GitRepositoryTools } from "./GitRepositoryTools";
+import { GitRepositorySetup } from "./GitRepositorySetup";
 import { GitRevisionComparison } from "./GitRevisionComparison";
+import { GitSyncTools } from "./GitSyncTools";
 import { t } from "./i18n";
 import { useTimestamps } from "./useTimestamps";
 import { opposite, type Side } from "./panes";
@@ -187,8 +189,11 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState("");
   const [changes, setChanges] = useState(false);
-  const [historyMode, setHistoryMode] = useState<"history" | "graph" | "file" | "compare" | "merge" | "tools" | "repository">("history");
+  const [historyMode, setHistoryMode] = useState<"history" | "graph" | "file" | "compare" | "merge" | "tools" | "repository" | "sync">("history");
   const [historyTarget, setHistoryTarget] = useState<string>();
+  const [compareTarget, setCompareTarget] = useState<string>();
+  const [pull, setPull] = useState<{ method: "merge" | "rebase"; upstream: string }>();
+  const [setup, setSetup] = useState(false);
   const [mergeState, setMergeState] = useState<GitMergeState | null>(null);
   const [selectedChange, setSelectedChange] = useState("");
   const [draft, setDraft] = useState<{ root: string; message: string }>();
@@ -232,6 +237,7 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
       setHistoryMode("merge");
       return;
     }
+    setPull(undefined);
     setHistoryTarget(hash);
     setHistoryMode("tools");
   }
@@ -323,6 +329,9 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
     <section className={"pane git-pane git-pane-" + side} aria-label={t(changes ? "Changes" : "Branches")} data-help-topic="gitView" data-pane-side={side}>
       {header}
       {location}
+      <div className="git-branch-actions">
+        <Button onClick={() => setSetup(true)}>{t("Repository setup…")}</Button>
+      </div>
       {!changes && <input className="git-filter" ref={filterField} type="search" value={filter} aria-label={t("Filter branches")}
         placeholder={t("Filter branches")} onChange={(event) => setFilter(event.target.value)}
         onKeyDown={(event) => {
@@ -359,32 +368,45 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
           <Button disabled={!tip || !!error} aria-pressed={historyMode === "file"}
             onClick={() => setHistoryMode(historyMode === "file" ? "history" : "file")}>{t("File history")}</Button>
           <Button disabled={!repository || !!error} aria-pressed={historyMode === "compare"}
-            onClick={() => setHistoryMode(historyMode === "compare" ? "history" : "compare")}>{t("Compare revisions")}</Button>
-          <Button disabled={(!branch || selected === checkedOut) && !mergeState} aria-pressed={historyMode === "merge"}
-            onClick={() => setHistoryMode(historyMode === "merge" ? "history" : "merge")}>{t(mergeState ? gitOperationStatus(mergeState.session.operation) : "Merge branch")}</Button>
+            onClick={() => { setCompareTarget(undefined); setHistoryMode(historyMode === "compare" ? "history" : "compare"); }}>{t("Compare revisions")}</Button>
+          <Button disabled={(!branch || selected === checkedOut) && !mergeState && pull?.method !== "merge"} aria-pressed={historyMode === "merge"}
+            onClick={() => { setPull(undefined); setHistoryMode(historyMode === "merge" ? "history" : "merge"); }}>
+            {t(mergeState ? gitOperationStatus(mergeState.session.operation) : "Merge branch")}</Button>
           <Button disabled={!repository || !!error || !!mergeState} aria-pressed={historyMode === "tools"}
-            onClick={() => { setHistoryTarget(undefined); setHistoryMode(historyMode === "tools" ? "history" : "tools"); }}>{t("History actions")}</Button>
+            onClick={() => { setPull(undefined); setHistoryTarget(undefined); setHistoryMode(historyMode === "tools" ? "history" : "tools"); }}>{t("History actions")}</Button>
           <Button disabled={!repository || !!error} aria-pressed={historyMode === "repository"}
             onClick={() => setHistoryMode(historyMode === "repository" ? "history" : "repository")}>{t("Repository tools")}</Button>
+          <Button disabled={!repository || !!error || !!mergeState} aria-pressed={historyMode === "sync"}
+            onClick={() => setHistoryMode(historyMode === "sync" ? "history" : "sync")}>{t("Synchronize repository")}</Button>
         </div>
       </header>
       {repository && !changes && (historyMode === "merge"
-        ? <GitMerge key={repository.root} root={repository.root} source={branch && selected !== checkedOut ? branch.reference : ""}
+        ? <GitMerge key={repository.root} root={repository.root} source={pull?.method === "merge" ? pull.upstream :
+          branch && selected !== checkedOut ? branch.reference : ""}
           state={mergeState} refresh={refresh} onRefresh={onRefresh} onOpen={onOpen} canEdit={canEdit} />
         : historyMode === "tools"
-        ? <GitHistoryTools key={repository.root + ":" + (historyTarget ?? "")} repository={repository}
-          initialTarget={historyTarget ?? tip} initialRef={historyTarget ? undefined : branch?.reference} onRefresh={onRefresh} />
+        ? <GitHistoryTools key={repository.root + ":" + (pull?.upstream ?? historyTarget ?? "")} repository={repository}
+          initialTarget={historyTarget ?? tip} initialRef={pull?.method === "rebase" ? pull.upstream : historyTarget ? undefined : branch?.reference}
+          initialAction={pull?.method === "rebase" ? "rebase" : undefined} onRefresh={onRefresh} />
         : historyMode === "repository"
         ? <GitRepositoryTools key={repository.root} repository={repository} refresh={refresh} onRefresh={onRefresh}
           onOpen={onOpenWorktree} onTerminal={onTerminal} />
+        : historyMode === "sync"
+        ? <GitSyncTools key={repository.root} repository={repository} refresh={refresh} onRefresh={onRefresh}
+          onCompare={(target) => { setCompareTarget(target); setHistoryMode("compare"); }}
+          onPull={(method, upstream) => { setPull({ method, upstream }); setHistoryTarget(undefined);
+            setHistoryMode(method === "merge" ? "merge" : "tools"); }} />
         : historyMode === "compare"
-        ? <GitRevisionComparison key={repository.root + ":" + selected + ":" + refresh} repository={repository} target={tip} />
+        ? <GitRevisionComparison key={repository.root + ":" + (compareTarget ?? selected) + ":" + refresh}
+          repository={repository} target={compareTarget ?? tip} />
         : historyMode === "graph" && tip
           ? <CommitGraph key={tip + ":" + refresh} root={repository.root} tip={tip} />
           : historyMode === "file" && tip
             ? <FileRevision key={tip + ":" + refresh} root={repository.root} tip={tip} onTarget={useHistoryTarget} />
           : <History key={selected + ":" + (tip ?? "") + ":" + refresh} root={repository.root} tip={tip} onTarget={useHistoryTarget} />)}
     </section>
+    {setup && <GitRepositorySetup initialPath={repository?.root ?? path} onClose={() => setSetup(false)}
+      onOpen={(folder) => { setSetup(false); onOpenWorktree(folder); onRefresh(); }} />}
     {branchReview && <Dialog title={t(branchActions[branchReview.request.action])} helpTopic="gitView"
       onClose={branchWorking ? undefined : () => setBranchReview(undefined)} footer={<>
         <Button disabled={branchWorking} onClick={() => setBranchReview(undefined)}>{t("Cancel")}</Button>

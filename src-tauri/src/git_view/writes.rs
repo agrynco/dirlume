@@ -67,6 +67,7 @@ pub enum WriteError {
     UnsupportedChange,
     ConfirmReplacement,
     EmptyCommit,
+    PartialClone { path: String, message: String },
     Failed(String),
 }
 

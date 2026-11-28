@@ -69,13 +69,13 @@ function PushImpact({ review }: { review: GitPushReview }) {
   </>;
 }
 
-export function GitHistoryTools({ repository, initialTarget, initialRef, onRefresh }: {
-  repository: GitRepository; initialTarget?: string; initialRef?: string; onRefresh: () => void;
+export function GitHistoryTools({ repository, initialTarget, initialRef, initialAction, onRefresh }: {
+  repository: GitRepository; initialTarget?: string; initialRef?: string; initialAction?: "rebase"; onRefresh: () => void;
 }) {
   const root = repository.root;
   const refs = useId();
-  const [action, setAction] = useState<Action>("cherryPick");
-  const [target, setTarget] = useState(initialTarget ?? repository.head ?? "");
+  const [action, setAction] = useState<Action>(initialAction ?? "cherryPick");
+  const [target, setTarget] = useState((initialAction === "rebase" ? initialRef : undefined) ?? initialTarget ?? repository.head ?? "");
   const [parent, setParent] = useState<number | null>(null);
   const [branch, setBranch] = useState(repository.headRef?.replace(/^refs\/heads\//, "") ?? "");
   const [remotes, setRemotes] = useState<string[]>();

@@ -11,11 +11,12 @@ export const writeErrors: Record<string, string> = {
 };
 
 export function writeFailure(error: unknown) {
-  return (error instanceof Error ? error.cause : error) as { kind?: string; detail?: string } | null;
+  return (error instanceof Error ? error.cause : error) as { kind?: string; detail?: unknown } | null;
 }
 
 export function writeError(error: unknown) {
   const failure = writeFailure(error);
   const message = failure?.kind ? writeErrors[failure.kind] : undefined;
-  return message ? t(message) : t(failure?.detail || "Git could not complete the operation.");
+  const detail = typeof failure?.detail === "string" && failure.detail;
+  return t(message || detail || "Git could not complete the operation.");
 }

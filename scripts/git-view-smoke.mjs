@@ -16,6 +16,7 @@ try {
     const root = windows ? "C:\\repo ł" : "/repo ł";
     const sub = root + (windows ? "\\nested" : "/nested");
     const linked = windows ? "C:\\linked repo ł" : "/linked repo ł";
+    const cloned = windows ? "C:\\cloned repo ł" : "/cloned repo ł";
     const file = { name: "note.txt", directory: false, link: false, hidden: false, size: 1, modified: null };
     const hash = (value) => value.repeat(40);
     const commit = (value, subject) => ({
@@ -24,6 +25,10 @@ try {
     window.gitEvents = [];
     let indexVersion = 0;
     let stashes = [];
+    const remotes = [
+      { name: "origin", fetchUrls: ["https://example.invalid/origin"], pushUrls: ["https://example.invalid/origin"], stamp: [1] },
+      { name: "backup", fetchUrls: ["https://example.invalid/backup"], pushUrls: ["https://example.invalid/backup"], stamp: [2] },
+    ];
     let worktrees = [
       { path: root, branch: "refs/heads/main", head: hash("a"), primary: true, locked: false, bare: false, prunable: false },
       { path: linked, branch: "refs/heads/topic", head: hash("b"), primary: false, locked: false, bare: false, prunable: false },
@@ -48,7 +53,8 @@ try {
           case "git_repository":
             window.gitEvents.push(args.path);
             if (window.gitError) throw window.gitError;
-            return { root: args.path === linked ? linked : root, name: args.path === linked ? "linked repo ł" : "repo ł",
+            return { root: args.path === linked ? linked : args.path === cloned ? cloned : root,
+              name: args.path === linked ? "linked repo ł" : args.path === cloned ? "cloned repo ł" : "repo ł",
               headRef: window.gitDetached ? null : args.path === linked ? "refs/heads/topic" : "refs/heads/main",
               head: window.gitEmpty ? null : hash("a"),
               branches: window.gitEmpty || window.gitDetached ? [] : [
@@ -187,6 +193,36 @@ try {
             window.gitBisect = args.action === "reset" ? null :
               { ...window.gitBisect, concluded: true, log: "# first bad commit: " + hash("c") };
             return null;
+          case "git_repository_setup":
+            window.gitSetup = args;
+            if (args.action === "clone" && window.gitClonePartial) {
+              throw { kind: "partialClone", detail: { path: args.path, message: "Git could not check out files." } };
+            }
+            return args.path;
+          case "git_remotes":
+            assertRoot(args.root);
+            return remotes;
+          case "git_fetch_remote":
+            assertRoot(args.root);
+            window.gitFetch = { remote: args.remote.name, prune: args.prune };
+            return "Fetched updated refs";
+          case "git_upstream":
+            assertRoot(args.root);
+            return { headRef: "refs/heads/main", head: hash("a"), reference: window.gitUpstream ?? null,
+              remote: window.gitUpstream ? "origin" : null, remoteRef: window.gitUpstream ? "refs/heads/topic" : null,
+              tip: window.gitUpstream ? hash("c") : null };
+          case "git_set_upstream":
+            assertRoot(args.root);
+            window.gitUpstream = args.reference;
+            return null;
+          case "git_remote_ref_review":
+            assertRoot(args.root);
+            return { remote: args.remote, pushUrl: args.remote.pushUrls[0], source: args.source, destination: args.destination,
+              object: args.source ? hash("a") : null, deleteTip: args.source ? null : hash("b") };
+          case "git_transfer_remote_ref":
+            assertRoot(args.root);
+            window.gitTransfer = args.review;
+            return "Updated reviewed reference";
           case "open_terminal":
             window.gitTerminalDirectory = args.request.directory;
             return false;
@@ -304,7 +340,7 @@ try {
       },
     };
     function assertRoot(path) {
-      if (path !== root && path !== linked) throw "notRepository";
+      if (path !== root && path !== linked && path !== cloned) throw "notRepository";
     }
   });
   await page.goto("http://dirlume.test/");
@@ -519,6 +555,67 @@ try {
   await button(history, "Finish bisect").click();
   await button(page.getByRole("dialog", { name: "Finish bisect", exact: true }), "Finish bisect").click();
   await page.waitForFunction(() => window.gitBisectAction === "reset");
+  const repoPath = await page.evaluate(() => /Windows/i.test(navigator.userAgent) ? "C:\\repo ł" : "/repo ł");
+  const clonePath = await page.evaluate(() => /Windows/i.test(navigator.userAgent) ? "C:\\cloned repo ł" : "/cloned repo ł");
+  await button(branches, "Repository setup…").click();
+  const setup = page.getByRole("dialog", { name: "Repository setup", exact: true });
+  await setup.getByRole("combobox", { name: "Repository action", exact: true }).selectOption("clone");
+  await setup.getByRole("textbox", { name: "Repository URL or path", exact: true }).fill("https://example.invalid/origin");
+  await setup.getByRole("textbox", { name: "Repository folder", exact: true }).fill(clonePath);
+  await button(setup, "Review changes").click();
+  const clone = page.getByRole("dialog", { name: "Clone repository", exact: true });
+  await clone.getByText(clonePath, { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitSetup), undefined);
+  await page.evaluate(() => { window.gitClonePartial = true; });
+  await button(clone, "Clone repository").click();
+  await setup.getByText("Git left a partial clone at " + clonePath + ".", { exact: true }).waitFor();
+  await button(setup, "Review opening the partial clone").click();
+  const openRepo = page.getByRole("dialog", { name: "Open existing repository", exact: true });
+  await button(openRepo, "Open existing repository").click();
+  await branches.getByText("cloned repo ł", { exact: true }).waitFor();
+  await button(branches, "Repository setup…").click();
+  await setup.getByRole("textbox", { name: "Repository folder", exact: true }).fill(repoPath);
+  await button(setup, "Review changes").click();
+  await button(openRepo, "Open existing repository").click();
+  await branches.getByText("repo ł", { exact: true }).waitFor();
+  await button(history, "Synchronize repository").click();
+  await history.getByRole("combobox", { name: "Remote", exact: true }).selectOption("backup");
+  await button(history, "Fetch and prune").click();
+  const fetch = page.getByRole("dialog", { name: "Fetch and prune", exact: true });
+  await fetch.getByText("https://example.invalid/backup", { exact: true }).waitFor();
+  await button(fetch, "Fetch and prune").click();
+  await history.getByLabel("Git output", { exact: true }).filter({ hasText: "Fetched updated refs" }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.gitFetch), { remote: "backup", prune: true });
+  await button(history, "Upstream").click();
+  await history.getByRole("combobox", { name: "Upstream branch", exact: true }).selectOption("refs/remotes/origin/topic");
+  await button(history, "Set upstream").click();
+  await button(page.getByRole("dialog", { name: "Set upstream", exact: true }), "Set upstream").click();
+  await button(history, "Compare upstream").click();
+  assert.equal(await history.getByRole("combobox", { name: "Target revision", exact: true }).inputValue(), "refs/remotes/origin/topic");
+  await button(history, "Synchronize repository").click();
+  await button(history, "Upstream").click();
+  await button(history, "Pull by merge").click();
+  await button(page.getByRole("dialog", { name: "Pull by merge", exact: true }), "Pull by merge").click();
+  await history.getByText("refs/remotes/origin/topic", { exact: false }).waitFor();
+  await button(history, "Create merge commit").waitFor();
+  await button(history, "Synchronize repository").click();
+  await button(history, "Upstream").click();
+  await button(history, "Pull by rebase").click();
+  await button(page.getByRole("dialog", { name: "Pull by rebase", exact: true }), "Pull by rebase").click();
+  assert.equal(await history.getByRole("combobox", { name: "History action", exact: true }).inputValue(), "rebase");
+  assert.equal(await history.getByRole("combobox", { name: "Rebase base", exact: true }).inputValue(), "refs/remotes/origin/topic");
+  await button(history, "Synchronize repository").click();
+  await button(history, "Remote references").click();
+  await history.getByRole("combobox", { name: "Reference action", exact: true }).selectOption("deleteTag");
+  await history.getByRole("textbox", { name: "Remote tag name", exact: true }).fill("v1");
+  await button(history, "Review changes").click();
+  const deleteTag = page.getByRole("dialog", { name: "Delete remote tag", exact: true });
+  await deleteTag.getByText("refs/tags/v1", { exact: true }).waitFor();
+  await deleteTag.getByText("b".repeat(40), { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitTransfer), undefined);
+  await button(deleteTag, "Delete remote tag").click();
+  await history.getByLabel("Git output", { exact: true }).filter({ hasText: "Updated reviewed reference" }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitTransfer.destination), "refs/tags/v1");
   await button(branches, "Changes").click();
   const changes = page.getByRole("region", { name: "Changes", exact: true });
   const preview = page.getByRole("region", { name: "Change preview", exact: true });
