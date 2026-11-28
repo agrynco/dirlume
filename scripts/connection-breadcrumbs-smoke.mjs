@@ -1,3 +1,4 @@
+import { openMainMenu } from "./menu-header-smoke.mjs";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
@@ -245,7 +246,7 @@ async function checkKSwitcherOperations(page) {
   await button(viewer, "Close document").click();
   await list(page, "left").waitFor();
   await row(page, "left", "notes.txt").click();
-  await list(page, "left").press("F2");
+  await (await openMainMenu(page, "Files")).getByRole("menuitem", { name: "Rename", exact: true }).click();
   const rename = page.getByRole("dialog", { name: "Rename", exact: true });
   await rename.getByRole("textbox", { name: "Name", exact: true }).fill("renamed.txt");
   await button(rename, "Rename").click();
@@ -600,7 +601,7 @@ async function checkTreeSources(page) {
   await button(create, "Create").click();
   await create.waitFor({ state: "hidden" });
   await directRow(folders[0] + "/new-directory").click();
-  await list(page, side).press("F2");
+  await (await openMainMenu(page, "Files")).getByRole("menuitem", { name: "Rename", exact: true }).click();
   const rename = page.getByRole("dialog", { name: "Rename", exact: true });
   await rename.getByLabel("Name", { exact: true }).fill("renamed-directory");
   await button(rename, "Rename").click();
@@ -733,7 +734,7 @@ async function checkWritableServer(page) {
   await page.waitForFunction(() => window.connectionFixture.edits.length === 1);
   await button(editor, "Close document").click();
   await row(page, side, folders[0] + "/new.txt").click();
-  await list(page, side).press("F2");
+  await (await openMainMenu(page, "Files")).getByRole("menuitem", { name: "Rename", exact: true }).click();
   const rename = page.getByRole("dialog", { name: "Rename", exact: true });
   await rename.getByLabel("Name", { exact: true }).fill("renamed.txt");
   await button(rename, "Rename").click();

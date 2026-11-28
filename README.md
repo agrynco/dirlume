@@ -58,7 +58,9 @@ Choose **Standard**, **Twin panels**, or **Classic commander** in **Options → 
 
 The current marked row in the active pane has its own fill and outline. Adjust or reset **Current marked row background** and **Current marked row outline** independently in **Options → Appearance → Panels**.
 
-Enable **Right-click selection** under **Options → Main File Panels** to mark an item with a short right-click. Drag with the right button held to mark the rows you cross, or start on a marked row to unmark them. Hold the button over a row or empty pane space for half a second and release when the spinner appears to open the usual context menu.
+Short right-click opens the Dirlume file menu. Hold the button for half a second and release when the indicator appears to open the Windows Shell menu for a local item. On Ubuntu or for a source without a system menu, a hold opens the Dirlume menu. Press **Shift+F10** for the Dirlume menu on the focused row. A marked row offers batch actions with item counts. An unmarked row keeps the other marks and targets only that item.
+
+Enable **Right-click selection** under **Options → Main File Panels** to toggle a mark with a short right-click. Drag with the right button held to mark the rows you cross, or start on a marked row to unmark them. The hold gesture still opens the menu.
 
 Choose **List** or **Tree** independently in either local file pane. Use a folder's disclosure button or Left and Right to traverse the tree. You can mark and operate on items across branches. Switching to List from a nested row opens that item's parent and keeps it selected if available. Turn on **Folder sizes** to scan the current subtree in the background in either view. Use **Refresh** to recalculate after changes. Completed values stay visible until their replacements are ready. An ellipsis indicates a pending size, a dash indicates an unavailable size, and ≥ marks a partial total. Choose **Size on disk** when allocation is available. The toggle starts off each time the app opens.
 
@@ -105,7 +107,9 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Tab, arrows, Insert | Switch panes, navigate, and mark files. Ctrl-click or Shift-click also selects multiple items. |
 | Shift+↑ / Shift+↓ | Toggle the mark on the file or folder under the cursor, then move one row in that direction when possible. At either end of the list, the cursor stays in place and the mark still toggles. |
 | Alt+F1 / Alt+F2 | Open sources for the left or right pane. On Windows, select a drive by letter to open the other pane's local folder on that drive, or open the drive root. |
-| F2 / Ctrl+R | Refresh the active pane. F2 saves when editing a text file. |
+| Enter / Shift+Enter | Open the current item or hand it to the system opener. On Ubuntu, **Open** runs a local executable `.sh` in the embedded Terminal from the script’s folder. |
+| Ctrl+R | Refresh the active pane. |
+| F2 | Open **User Menu** from a local file pane, or save while editing a text file. |
 | F3 / F4 / Shift+F4 | View text or Markdown, edit text, or create and edit a new file. F3 measures folders. |
 | Ctrl+Wheel | Change the font size of the Dirlume area under the pointer. |
 | Ctrl+Click | Open a linked Markdown document in a separate viewer tab. Command+Click also works on macOS. |
@@ -117,8 +121,8 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Ctrl+Alt+S | Open Options. |
 | Alt+letter | Jump to a matching name in the current pane. Refine the prefix in the Quick search field. |
 | Alt+F7 | Find files by name or mask in the active folder and its subfolders. |
-| F2 | Rename the selected file or folder in its row. |
-| Configurable | Open **User Menu** from a local file pane. Set **Open User Menu** in **Options → Keyboard shortcuts**. |
+| Files → Rename | Rename the selected file or folder. Set a shortcut for **Rename** in **Options → Keyboard shortcuts**. |
+| Tab / Shift+Tab in editable text | Insert a tab character or outdent the current or selected lines. |
 | Shift+F1 | Create an archive from local files and folders. |
 | F7 / F8 or Delete / Shift+Delete | Create folders or directory links, send selected items to Trash, or permanently delete after confirmation. |
 | Ctrl+C / Ctrl+V in a file list | Copy local files to the system clipboard or paste files into the active local folder. |
@@ -128,16 +132,16 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
 | Ctrl+↑ / Ctrl+↓ | Expand the terminal or give height back to the file panes. The last step restores the command line. |
 | Ctrl+F / Ctrl+Enter | Insert the selected path or name in the command line. Ctrl+F on **..** inserts the current folder path in a local or SSH pane. |
-| Ctrl+E / Alt+F8 | Recall earlier commands or open the shared command history. The terminal receives keystrokes while its input has focus. |
+| Ctrl+E / Alt+F8 | Recall earlier commands or open the searchable command history. Select a row to edit the original command, including its line breaks and indentation. |
 | Shift+F11 | Compare the selected files, or choose **Commands → Compare files**. Use F7 and F8 to navigate between differences. |
 
 In **New folder**, enable **Process multiple names** to separate names with commas or semicolons. Put names containing a separator in double quotes. For a link, choose **Symbolic link** or **Directory junction** on Windows, then select an existing target folder. Press **Alt+Down** in the dialog to recall successful names from history.
 
 Click **Terminal** or press **F12** to show or hide the interactive shell. Dirlume keeps a local shell and a separate shell for each SSH connection. The active local or SSH pane and its terminal synchronize their working directories when a supported shell returns to its prompt. Hiding the terminal preserves the session and its split height. Use **Ctrl+↑/↓** to resize it in steps or **Ctrl+O** to hide or restore the file panes. Click **Close terminal** to end the active session.
 
-Open **Commands → User Menu** to run saved commands from the captured local pane. The current folder's `.dirlume-menu.json` takes precedence over the personal menu. Use **Menu source** to switch to a parent or personal menu, and **Manage menus** to edit commands, submenus, and separators. Assign a letter, digit, or function key within each menu level. Choose a visibility rule and use **Show hidden entries** to find filtered commands.
+Press **F2** in a local file pane or choose **Commands → User Menu**. Change the **Open User Menu** shortcut in **Options → Keyboard shortcuts**. The current folder's `.dirlume-menu.json` takes precedence over the personal menu. Use **Menu source** to switch to a parent or personal menu. Use **New command** or **Edit** to write shell commands, then **Save command** to return to the same menu. Choose **Run**, press **Enter**, or use the entry's hotkey to execute it. Use **Manage menus** to organize commands, submenus, and separators.
 
-Use **Insert token** to add the active folder, opposite folder, focused name, path, stem or extension, marked paths, or a named prompt. Enter shell steps one per line. Put tokens where arguments go, without adding extra quotes. Folder definitions require a review and approval of their current contents for the session. The preview shows substituted values before prompted commands run. Commands run in order in their own PowerShell, sh, dash, Bash, or Zsh session. The Terminal reports failures and exit status. **Stop** cancels remaining steps. Completed steps can leave changes.
+Use **Insert value** to add the active folder, opposite folder, focused name, path, stem or extension, marked paths, or a named prompt. Enter one shell command per line and insert values where arguments go, without adding extra quotes. **Advanced options** contains the hotkey, visibility, name mask, and run-time inputs. Use **Show hidden entries** to find filtered commands. Folder definitions require a review and approval of their current contents for the session. The preview shows substituted values before prompted commands run. Commands run in order in their own PowerShell, sh, dash, Bash, or Zsh session. The Terminal reports failures and exit status. **Stop** cancels remaining steps. Completed steps can leave changes.
 
 The shell receives keystrokes while its input has focus. A hint in the status bar, or beside the close button in the terminal header when the status bar is hidden, reminds you to click a file pane to use its shortcuts. Use the question-mark button to open offline Help and return to your command when you close it. Click **Terminal** to restore the panes when they are hidden. The terminal layout shortcuts remain available while editing a shell command. From the command line, **Alt+F8** opens dated history to search, edit, or rerun earlier commands. Dirlume keeps the last 1,000 submissions from the command line and from supported embedded shells.
 
@@ -179,7 +183,7 @@ Choose **Compare revisions** in the history pane to compare two branches, tags, 
 
 Open **Commit graph** to browse the selected branch, see its parent links and reference labels, and expand commit details. Choose **Show upstream** for incoming and outgoing commits or **Compare revisions in graph** to compare two local revisions. Search commit messages across the active history and use **Load more** for older matches. Open **File history** and enter a repository-relative path. Select a commit to compare the file with its parent side by side. Merge commits use their first parent. Use **Show revision** to read the selected version or **Compare with revision…** to choose another branch, tag, or commit. **Show blame** opens the committed file in the Text Viewer. Select an attribution to read the originating commit, then use **Back to line** to return to your place.
 
-Right-click a local file or press **Shift+F10** on its row to open the **Git** group. **Show history** and **Show blame** start at the checked-out revision. **Compare with revision…** compares the working file with a stored revision. **Show diff** shows staged and unstaged changes for that file. Git text comparisons use the built-in File Compare controls. Choose **Options → Layout** for **Unified** or **Side-by-side**. On Windows, choose **Windows context menu…** to open the system menu for the file.
+Open the Dirlume file menu for one eligible file to find its **Git** submenu. **Show history** and **Show blame** start at the checked-out revision. **Compare with revision…** compares the working file with a stored revision. **Show diff** shows staged and unstaged changes for that file. Git text comparisons use the built-in File Compare controls. Choose **Options → Layout** for **Unified** or **Side-by-side**.
 
 Each regular file pane shows the current branch and a **Git** column inside a working tree. The column shows `S` for staged changes and `W` for working-file changes, followed by the Git status letter. `?` marks untracked files and `Δ` marks folders with changes below them. Hover over a marker for details or open it for **Show diff**, **Compare with HEAD**, and **Show history**. These actions use File Compare and keep both panes in place. Right-click a column heading to hide Git. Local changes update the markers automatically. For a Linux SFTP connection with Git and SSH command access, use **Refresh** to update its status.
 
@@ -233,8 +237,6 @@ Right-click a process row or press **Shift+F10** on the focused row to inspect i
 
 On Windows, select a local file or folder and choose **Find locking processes** from the main menu. A sharing violation can also offer this action. The opposite pane shows what Windows found and keeps the source selection. Choose **Properties** for executable details or **Back to files** to return to the previous location. Both **F8** and **End process** in Properties ask for confirmation.
 
-Right-click an item or the empty space in a Windows filesystem pane for the classic Shell context menu. Dirlume provides its own file actions menu for FTP panes and for Linux and macOS.
-
 When Windows denies access, **Open as administrator** requests UAC for a separate Dirlume window with the **Administrator** title bar label. The new window uses the original window's applied preferences and opens the parent and selected item in the requesting pane. It also restores the opposite local folder or reopens Space Analyzer at its local root. Retry the action in the new window after it opens.
 
 Press **Ctrl+A** while focused on a file list to inspect the current item’s attributes, owner, and timestamps. **Apply** saves supported flags and refreshes the file panes. Windows supports Archive, Hidden, System, Not indexed, and Read-only on files. On Linux and macOS you can change the owner’s write bit. Remote item details are read-only and depend on what the source reports.
@@ -282,7 +284,7 @@ Packaged Dirlume includes the [7-Zip command-line tools](https://www.7-zip.org/d
 
 Press **Enter** on an archive to open it in a pane. Use **F5** to extract selected members to a local folder with the normal copy conflict prompts, **F3** to view files, or the **Parent folder** button to go up. A writable archive supports editing text files with **F4**, moving members to a local or writable archive folder with **F6**, and removing members with **F8**. A move removes the archive member only after the destination copy completes. Encrypted, split, and other formats without update support open read-only. Dirlume skips unsafe member paths and refuses to extract links.
 
-With a writable, unencrypted ZIP or 7z archive open, select local files or folders in the other pane and press **F5** to copy or **F6** to move them into the displayed archive folder. The confirmation shows the archive filename and member path. Use **F7** to create a folder, **Shift+F4** to create a text file, or **F2** to rename an archive entry. In **Tree**, new entries go into the selected folder or the selected file’s parent. Expand branches to browse any open archive or server share. Canceling a write before replacement keeps the original archive and source files.
+With a writable, unencrypted ZIP or 7z archive open, select local files or folders in the other pane and press **F5** to copy or **F6** to move them into the displayed archive folder. The confirmation shows the archive filename and member path. Use **F7** to create a folder, **Shift+F4** to create a text file, or **Files → Rename** to rename an archive entry. In **Tree**, new entries go into the selected folder or the selected file’s parent. Expand branches to browse any open archive or server share. Canceling a write before replacement keeps the original archive and source files.
 
 ## Remote sources
 
@@ -310,7 +312,7 @@ The SSH pane opens in the server's initial directory. Browse FTP, FTPS, and SFTP
 
 Press **F6** to move files or folders between a local folder and SFTP. Copy and Move show the connection beside the editable destination path. Moves remove verified source files after the destination copy commits. If removal fails, the dialog identifies the destination and the retained source.
 
-Press **F3** to view a remote file or measure a folder and **F4** to edit text. **F7** creates a folder, **Shift+F4** creates and opens a text file, and **F2** renames an SFTP file or folder. Saving preserves the encoding and checks whether the file changed on the server. If SFTP denies a file operation, **SSH permissions** shows the affected host and path and offers to continue with sudo. Transfers and deletions keep completed work when they reach a protected item. The server must allow the SSH account to run the external OpenSSH SFTP server through sudo. Dirlume uses the password to open an authorized session. Browsing and reading use a read-only session. The first protected write requires write authorization. Subsequent operations on that connection can reuse authorization until it has been idle for five minutes.
+Press **F3** to view a remote file or measure a folder and **F4** to edit text. **F7** creates a folder, **Shift+F4** creates and opens a text file, and **Files → Rename** renames an SFTP file or folder. Saving preserves the encoding and checks whether the file changed on the server. If SFTP denies a file operation, **SSH permissions** shows the affected host and path and offers to continue with sudo. Transfers and deletions keep completed work when they reach a protected item. The server must allow the SSH account to run the external OpenSSH SFTP server through sudo. Dirlume uses the password to open an authorized session. Browsing and reading use a read-only session. The first protected write requires write authorization. Subsequent operations on that connection can reuse authorization until it has been idle for five minutes.
 
 Press **F8** or **Shift+Delete** to permanently delete selected items on FTP, SSH, and Windows SMB shares opened by UNC path. On FTP and SSH, Dirlume asks separately before deleting the contents of a nonempty folder. Deletion uses the connected account's standard permissions.
 
@@ -320,7 +322,7 @@ The pane opens at the server's initial directory. Use **F5** to copy files or fo
 
 At startup, Dirlume reconnects to the saved FTP profile and reopens the last FTP folder in the same pane. If reconnection fails, the pane shows a local folder and reports the error. Dirlume keeps the FTP location for the next startup until you navigate to another location in that pane.
 
-Inside an FTP pane, **F3** or **Enter** opens a file in the viewer. **F3** also measures folders. **F7** creates a folder and **Shift+F4** creates and opens a text file. **F4** opens a text file for editing and **F2** saves it back to the server if the original revision still matches. **F2** renames an item and **F8** prompts before permanently deleting selected items, with an additional confirmation for nonempty folders. FTP files can be included in a text comparison. The viewer and editor show the full address of a remote file, including the protocol, host, any non-default port, and filename.
+Inside an FTP pane, **F3** or **Enter** opens a file in the viewer. **F3** also measures folders. **F7** creates a folder and **Shift+F4** creates and opens a text file. **F4** opens a text file for editing and **F2** saves it back to the server if the original revision still matches. **Files → Rename** renames an item and **F8** prompts before permanently deleting selected items, with an additional confirmation for nonempty folders. FTP files can be included in a text comparison. The viewer and editor show the full address of a remote file, including the protocol, host, any non-default port, and filename.
 
 **Dirlume server** runs as a separate process on Windows, Ubuntu, and macOS and shares one folder over TLS. Clients can browse in List or Tree, download items, and open or compare text files. Start the server with `--allow-write` to allow invitation holders to upload and modify items under the host’s filesystem permissions. [Server setup and autostart](docs/server.md).
 

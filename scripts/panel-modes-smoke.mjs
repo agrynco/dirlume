@@ -126,7 +126,7 @@ export async function testPanelModes({ page, startDesktop, exitDesktop, root }) 
   await list("left").press("Control+Shift+c");
   await page.waitForFunction(async (expected) =>
     await window.__TAURI_INTERNALS__.invoke("clipboard_text") === expected, join(folder, "report.txt"));
-  await list("left").press("F2");
+  await (await openMainMenu(page, "Files")).getByRole("menuitem", { name: "Rename", exact: true }).click();
   const rename = row("report.txt").getByRole("textbox", { name: "New name for report.txt", exact: true });
   assert.equal(await rename.inputValue(), "report.txt");
   await rename.press("Escape");

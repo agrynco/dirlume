@@ -46,11 +46,12 @@ export function saveDialogSize(key: string, size: Dimensions) {
   try { localStorage.setItem(sizePrefix + key, JSON.stringify(size)); } catch { /* The current size still applies. */ }
 }
 
-export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownCapture,
+export function Dialog({ title, children, footer, headingActions, onClose, onKeyDown, onKeyDownCapture,
   wide = false, resizeKey, dismissOnOutside = false, standalone = false, modeless = false, suspended = false, tone, font, fontZoom, helpTopic, contextHelp = false }: {
   title: string;
   children: ReactNode;
   footer?: ReactNode;
+  headingActions?: ReactNode;
   onClose?: () => void;
   onKeyDown?: KeyboardEventHandler<HTMLDialogElement>;
   onKeyDownCapture?: KeyboardEventHandler<HTMLDialogElement>;
@@ -210,6 +211,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
       onCancel={(event) => { event.preventDefault(); event.stopPropagation(); onClose?.(); }}>
       <header className="dialog-heading">
         <h2 id={heading}>{title}</h2>
+        {headingActions && <div className="dialog-heading-actions">{headingActions}</div>}
         {onClose && !standalone && <Button type="button" className="icon-button" aria-label={t("Close dialog")} onClick={onClose}><X /></Button>}
       </header>
       {children}

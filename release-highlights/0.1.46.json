@@ -1,0 +1,10 @@
+{
+  "version": "0.1.46",
+  "highlights": [
+    "Press F2 in a local pane to open User Menu. Create or edit a command in a compact dialog, then save it directly to the selected menu. Rename remains under Files and has its own configurable shortcut.",
+    "A short right-click opens the Dirlume file menu by default. A hold opens the Windows Shell menu for local items. The Dirlume menu shows batch counts for marked items and groups file-specific Git actions in a submenu.",
+    "Command history is wider and uses shell syntax colors. Multiline commands retain their line breaks and indentation when you select them to edit.",
+    "On Ubuntu, use Open from a local pane to run an executable shell script in the embedded Terminal from its containing folder.",
+    "Press Tab to insert a tab character or Shift+Tab to outdent the current or selected lines in Text Editor. Both shortcuts are configurable."
+  ]
+}

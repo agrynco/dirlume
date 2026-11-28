@@ -344,7 +344,7 @@ try {
     await button(lanEditor, "Close document").click();
     const lanChild = files("left").getByRole("treeitem", { level: 2, name: /note\.txt/ });
     await lanChild.click();
-    await files("left").press("F2");
+    await (await openMainMenu(page, "Files")).getByRole("menuitem", { name: "Rename", exact: true }).click();
     const lanRename = page.getByRole("dialog", { name: "Rename", exact: true });
     await lanRename.getByRole("textbox", { name: "Name", exact: true }).fill("renamed.txt");
     await button(lanRename, "Rename").click();

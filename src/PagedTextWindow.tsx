@@ -205,7 +205,8 @@ export function PagedTextWindow({ initial, file, active, editing, shortcuts, fon
     {hex ? <HexViewer file={file} revision={0} /> :
       page && <div className="source-surface">
         <CodeSurface key={index} file={file} editing={editing} locked={busy || editing && !writable} active={active}
-          fontSize={fontSize} value={text} onChange={setText} textTabWidth={textTabWidth} showTextWhitespace={showTextWhitespace} />
+          fontSize={fontSize} value={text} onChange={setText} indentationShortcuts={shortcuts}
+          textTabWidth={textTabWidth} showTextWhitespace={showTextWhitespace} />
       </div>}
     {confirm && <Dialog title={t("Unsaved changes")} tone="warning" onClose={() => setConfirm(false)}>
       <div className="dialog-body"><p><Message text="Discard the unsaved changes to {0}?"><strong>{file.name}</strong></Message></p></div>
