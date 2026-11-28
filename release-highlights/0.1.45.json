@@ -2,6 +2,7 @@
   "version": "0.1.45",
   "highlights": [
     "Open Git history, blame, and revision comparisons from a file’s context menu. Git uses the same Compare files interface for unified and side-by-side views.",
+    "See Git branch and file statuses in local and Linux SSH panes. Open staged, unstaged, HEAD, and historical comparisons without leaving either file location.",
     "Inspect per-file patches before cherry-picking or reverting a commit, and browse line attribution directly in the text Viewer.",
     "Save folder shortcuts across local, network, archive, Google Drive, and Collections sources. Copy between Google Drive and other supported providers using the usual transfer dialogs.",
     "Size and Size in bytes automatically fit complete values and their headings in both panes.",
