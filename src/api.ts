@@ -1040,6 +1040,7 @@ export const api = {
     invoke<SmbConnection>("connect_smb", { path, credentials, remember }),
   fileAttributes: (directory: string, name: string) =>
     invoke<FileAttributes>("file_attributes", { directory, name }),
+  executableShellScript: (directory: string, name: string) => invoke<boolean>("executable_shell_script", { directory, name }),
   updateFileAttributes: (directory: string, name: string, changes: AttributeChange[]) =>
     invoke<FileAttributes>("update_file_attributes", { directory, name, changes }),
   operate: (directory: string, operation: Operation | { kind: "open_directory" }) =>
