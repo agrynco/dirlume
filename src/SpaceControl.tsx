@@ -25,10 +25,11 @@ export function SpaceControl({ place, free, onAnalyze, disabled }: {
     return () => { canceled = true; };
   }, [place]);
 
-  const capacity = free ? t("{0} free of {1}", formatSize(free.available), formatSize(free.total)) : "";
+  const drive = place.kind === "googleDrive";
+  const capacity = free ? t(drive ? "Google storage: {0} free of {1}" : "{0} free of {1}", formatSize(free.available), formatSize(free.total)) : "";
   const used = free ? Math.max(0, free.total - free.available) : 0;
   const usedPercent = free && free.total > 0 ? Math.min(100, 100 * used / free.total) : 0;
-  const capacityDetail = free ? t("{0} free of {1}, {2} used", formatSize(free.available), formatSize(free.total), formatSize(used)) : undefined;
+  const capacityDetail = free ? drive ? capacity : t("{0} free of {1}, {2} used", formatSize(free.available), formatSize(free.total), formatSize(used)) : undefined;
   return <div className="space-control" data-help-topic="spaceScope">
     <Button className="space-control-main" aria-label={t("Analyze space")} aria-description={capacityDetail}
       tooltip={capacityDetail ?? t("Open Space Analyzer to scan the current folder.")} data-tooltip-on-focus={free ? "true" : undefined}
@@ -36,8 +37,8 @@ export function SpaceControl({ place, free, onAnalyze, disabled }: {
       <HardDrive className="space-control-icon" aria-hidden="true" />
       {free ? <>
         <span className="pane-free-full">{capacity}</span>
-        <span className="pane-free-short">{t("{0} free", formatSize(free.available))}</span>
-        <span className="space-meter" aria-hidden="true"><span style={{ width: usedPercent + "%" }} /></span>
+        <span className="pane-free-short">{t(drive ? "Google storage: {0} free" : "{0} free", formatSize(free.available))}</span>
+        {free.total > 0 && <span className="space-meter" aria-hidden="true"><span style={{ width: usedPercent + "%" }} /></span>}
       </> : <span className="space-control-label">{t("Analyze space")}</span>}
     </Button>
     {scope && !disabled && <details ref={details} onBlur={(event) => {
@@ -54,7 +55,7 @@ export function SpaceControl({ place, free, onAnalyze, disabled }: {
           if (details.current) details.current.open = false;
           onAnalyze(scope.place);
         }}>
-          <span>{t(scope.kind === "volume" ? "Analyze volume" : scope.kind === "share" ? "Analyze share" : "Analyze connection root")}</span>
+          <span>{t(scope.kind === "googleDrive" ? "Analyze My Drive" : scope.kind === "volume" ? "Analyze volume" : scope.kind === "share" ? "Analyze share" : "Analyze connection root")}</span>
           <small>{spacePath(scope.place)}</small>
         </Button>
       </div>

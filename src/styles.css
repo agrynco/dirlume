@@ -891,6 +891,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 }
 .space-toolbar > button:last-child, .space-footer > button, .space-map-heading > strong { margin-inline-start: auto; }
 .space-toolbar select { min-width: 0; max-width: 100%; }
+.space-metric-note { margin: 0; padding: 5px 8px; color: var(--panel-muted); font: .85em/1.35 var(--ui-font); }
 .space-view-modes { display: flex; gap: 2px; }
 .space-analyzer :is(.space-view-modes button, .space-toolbar > button, .space-footer button, .pane-heading button) {
   padding: 2px 6px; min-height: 24px;

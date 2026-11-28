@@ -37,6 +37,10 @@ function driveSpace(drive?: ComputerDrive): DiskSpace | null {
 
 function paneSpaceTarget(place: Place | null): { key: string; read: () => Promise<DiskSpace | null> } | null {
   if (place?.kind === "local") return { key: JSON.stringify([place.kind, place.path]), read: () => api.diskSpace(place.path) };
+  if (place?.kind === "googleDrive") return { key: JSON.stringify([place.kind, place.id]), read: async () => {
+    const { limit, usage } = await api.googleDriveQuota(place.id);
+    return limit !== null && usage !== null ? { total: limit, available: Math.max(0, limit - usage) } : null;
+  } };
   if (place?.kind === "server" && place.pairedComputer && place.segments.length) {
     const [drive] = place.segments;
     return { key: JSON.stringify([place.kind, place.id, drive]), read: async () =>

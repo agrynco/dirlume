@@ -38,6 +38,8 @@ Folder shortcuts use one numbered picker for local folders, SMB, FTP/FTPS, SFTP,
 
 Google Drive transfers to local disks export supported Workspace documents and save reference-only items as `.url` links. Moving a reference or a folder containing references keeps its Drive source. Bulk transfers report individual failures and continue through the selection.
 
+Google Drive shows account storage limits and usage in Disk information, including Drive and Drive Trash usage when reported. Space Analyzer uses each owned file’s reported storage usage to show a My Drive folder in Tree and Treemap. It follows real folders by ID and reveals items in the original account.
+
 Space Analyzer, Scan volume, and folder sizing in List and Tree share a scanner. Local APFS uses batched metadata reads, and ext4 uses one metadata lookup per entry when mount IDs are available. The scanner uses ordinary directory reads and metadata when these optimizations are unavailable.
 
 Local Space Analyzer tree rows support the Windows Shell menu and Dirlume's Copy, Rename or move, Trash, and permanent deletion dialogs. They share the file pane's shortcuts and resolve actions from the selected row's parent path. Expanded branches survive a refresh after a file operation.

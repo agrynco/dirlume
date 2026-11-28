@@ -583,10 +583,13 @@ export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigat
         onChange={(event) => setMetric(event.target.value as Metric)}>
         <option value="allocated">{t("Size on disk")}</option>
         <option value="logical">{t("File size")}</option>
-      </select> : <span data-help-topic="spaceMetric">{t("File size")}</span>}
+      </select> : <span data-help-topic="spaceMetric">{t(place.kind === "googleDrive" ? "Storage used" : "File size")}</span>}
       {scanning && <Button data-help-topic="spaceActions" onClick={stop}>{t("Stop")}</Button>}
       <Button data-help-topic="spaceActions" onClick={rescan}>{t("Rescan")}</Button>
     </div>
+    {place.kind === "googleDrive" && <p className="space-metric-note" data-help-topic="spaceMetric">
+      {t("This scan counts storage reported for files you own in the selected folder. Google storage can also include Trash, other folders, and other Google services.")}
+    </p>}
     {result.phase !== "error" && (view === "tree" ? <SpaceTree result={result} metric={metric}
       expanded={expanded} toggle={toggle} selected={selected} select={select} tree={tree}
       itemContext={place.kind === "local" ? openItemMenu : undefined}
