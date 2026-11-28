@@ -9,7 +9,7 @@ import { SchemeOptions } from "./SchemeOptions";
 import { CommandField } from "./CommandField";
 import { clampSplit, SplitDivider } from "./SplitDivider";
 import { timestampSeconds, useTimestamps } from "./useTimestamps";
-import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHistory, type CommandEntry } from "./commandHistory";
+import { commandHistoryGroups, commandHistoryParts, historyLimit, readCommandHistory, saveCommandHistory, type CommandEntry } from "./commandHistory";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import {
   ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Coffee, Copy, Eye, EyeOff, FileDiff,
@@ -5064,7 +5064,7 @@ function CommandHistory({ commands, onChoose, onClose }: {
   const dateLabel = useTimestamps(commands.map(({ date }) => timestampSeconds(date)), "date");
   const groups = commandHistoryGroups(commands, query, dateLabel, t("Unknown date"));
   return (
-    <Dialog title={t("Command history")} onClose={onClose}>
+    <Dialog title={t("Command history")} helpTopic="terminal" onClose={onClose}>
       <div className="dialog-body command-menu">
         <label className="field">{t("Search commands")}
           <HistoryField historyKey="command-history-search" aria-label={t("Search commands")} data-initial-focus type="search"
@@ -5072,7 +5072,10 @@ function CommandHistory({ commands, onChoose, onClose }: {
         </label>
         {groups.length ? groups.map(({ date, commands }, index) => <section className="command-history-group" key={date + index} aria-label={date}>
           <h3>{date}</h3>
-          {commands.map((command) => <Button key={command} tooltip={command} onClick={() => onChoose(command)}>{command}</Button>)}
+          {commands.map((entry) => <Button key={entry.text} tooltip={entry.text} aria-label={entry.text} onClick={() => onChoose(entry.text)}>
+            <code>{commandHistoryParts(entry, windowsClient).map(({ start, text, className }) =>
+              className ? <span key={start} className={className}>{text}</span> : <Fragment key={start}>{text}</Fragment>)}</code>
+          </Button>)}
         </section>) :
           <p>{t("No commands found.")}</p>}
       </div>

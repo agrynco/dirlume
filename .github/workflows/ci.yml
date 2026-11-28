@@ -189,6 +189,9 @@ jobs:
       - name: Verify opening, editing, and running commands from User Menu
         if: github.event.action != 'closed' && runner.os != 'macOS'
         run: node scripts/user-menu-smoke.mjs
+      - name: Verify searchable, editable multiline command history
+        if: github.event.action != 'closed' && runner.os != 'macOS'
+        run: node scripts/command-history-smoke.mjs
       - name: Verify the About and title-bar donation buttons
         if: github.event.action != 'closed'
         run: node scripts/about-donation-smoke.mjs

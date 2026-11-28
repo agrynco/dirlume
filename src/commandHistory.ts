@@ -2,6 +2,28 @@ import { timestampSeconds } from "./useTimestamps";
 
 export type CommandEntry = { text: string; date: number | null; source?: "local" | "ssh" };
 
+// Match complete quoted values before options and operators, including across lines.
+const posixTokens = /\\[\s\S]|(?<comment>(?<!\S)#[^\r\n]*)|(?<string>\$'(?:\\[\s\S]|[^'\\])*(?:'|$)|'[^']*(?:'|$)|"(?:\\[\s\S]|[^"\\])*(?:"|$))|(?<option>(?<!\S)--?[A-Za-z][\w-]*)|(?<operator>\|[|&]?|&&|>>?|<<-?|[;&<>])/g;
+const powerShellTokens = /`[\s\S]|(?<comment><#[\s\S]*?(?:#>|$)|(?<!\S)#[^\r\n]*)|(?<string>@(?:"[\s\S]*?(?:\r?\n"@|$)|'[\s\S]*?(?:\r?\n'@|$))|'(?:''|[^'])*(?:'|$)|"(?:`[\s\S]|""|[^"`])*(?:"|$))|(?<option>(?<!\S)--?[A-Za-z][\w-]*)|(?<operator>\|\|?|&&|>>?|[;&])/g;
+
+export function commandHistoryParts(entry: CommandEntry, windows: boolean) {
+  if (!entry.source) return [{ start: 0, text: entry.text }];
+  const tokens = entry.source === "local" && windows ? powerShellTokens : posixTokens;
+  const parts: { start: number; text: string; className?: string }[] = [];
+  let start = 0;
+  for (const match of entry.text.matchAll(tokens)) {
+    const classes = match.groups!;
+    const className = classes.string ? "syntax-string" : classes.option ? "syntax-property" :
+      classes.operator ? "syntax-keyword" : classes.comment ? "syntax-comment" : undefined;
+    if (!className) continue;
+    if (match.index > start) parts.push({ start, text: entry.text.slice(start, match.index) });
+    parts.push({ start: match.index, text: match[0], className });
+    start = match.index + match[0].length;
+  }
+  if (start < entry.text.length) parts.push({ start, text: entry.text.slice(start) });
+  return parts;
+}
+
 const historyKey = "dirlume.command-history";
 export const historyLimit = 1000;
 
@@ -60,9 +82,10 @@ function keywords(command: string) {
 export function commandHistoryGroups(history: CommandEntry[], query: string,
   dateLabel: (time: number | null) => string | null, unknownDate: string) {
   const words = query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
-  const groups = [new Map<string, string[]>(), new Map<string, string[]>()];
+  const groups = [new Map<string, CommandEntry[]>(), new Map<string, CommandEntry[]>()];
   const seen = new Set<string>();
-  for (const { text, date } of history) {
+  for (const entry of history) {
+    const { text, date } = entry;
     if (seen.has(text)) continue;
     seen.add(text);
     const day = date === null ? null : new Date(date);
@@ -76,7 +99,7 @@ export function commandHistoryGroups(history: CommandEntry[], query: string,
     if (rank === -1) continue;
     const group = groups[rank];
     const entries = group.get(label) ?? [];
-    entries.push(text);
+    entries.push(entry);
     group.set(label, entries);
   }
   return groups.flatMap((group) => [...group].map(([date, commands]) => ({ date, commands })));

@@ -129,7 +129,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
 | Ctrl+↑ / Ctrl+↓ | Expand the terminal or give height back to the file panes. The last step restores the command line. |
 | Ctrl+F / Ctrl+Enter | Insert the selected path or name in the command line. Ctrl+F on **..** inserts the current folder path in a local or SSH pane. |
-| Ctrl+E / Alt+F8 | Recall earlier commands or open the shared command history. The terminal receives keystrokes while its input has focus. |
+| Ctrl+E / Alt+F8 | Recall earlier commands or open the searchable command history. Select a row to edit the original command, including its line breaks and indentation. |
 | Shift+F11 | Compare the selected files, or choose **Commands → Compare files**. Use F7 and F8 to navigate between differences. |
 
 In **New folder**, enable **Process multiple names** to separate names with commas or semicolons. Put names containing a separator in double quotes. For a link, choose **Symbolic link** or **Directory junction** on Windows, then select an existing target folder. Press **Alt+Down** in the dialog to recall successful names from history.
