@@ -106,7 +106,7 @@ async function checkFooter(dialog, labels, enlarged) {
 
 const browser = await chromium.launch({ channel: "chrome" });
 try {
-  const themes = ["dark", "light", "slate", "classic-blue", "lavender", "emerald", "aurora", "midnight", "sunrise", "graphite", "system"];
+  const themes = ["dark", "light", "classic-blue", "lavender", "emerald", "midnight", "sunrise", "system"];
   const english = copy.en;
   for (const platform of Object.keys(platforms)) {
     const page = await fixture(browser, platform);

@@ -352,8 +352,8 @@ try {
   assert.deepEqual(await typography(root), originalFonts);
   await done();
   const titlebar = page.locator(".topbar-scheme");
-  await titlebar.selectOption("graphite");
-  await page.locator('html[data-theme="graphite"]').waitFor();
+  await titlebar.selectOption("midnight");
+  await page.locator('html[data-theme="midnight"]').waitFor();
   assert.deepEqual(await typography(root), originalFonts);
   await exactButton(page, "Switch to favorite light scheme").click();
   await page.locator('html[data-theme="light"]').waitFor();

@@ -1,4 +1,4 @@
-import { readRetainedFonts, readSchemes, readSystemScheme, readTheme, type RetainedFonts, type Scheme, type Theme } from "./appearance";
+import { isRetiredTheme, readRetainedFonts, readSchemes, readSystemScheme, readTheme, type RetainedFonts, type Scheme, type Theme } from "./appearance";
 import { migrateSharedViewerZoom, validViewFontSize, viewFontKeys, type ViewFontSizes } from "./viewFonts";
 import { readLanguage, t, type Language } from "./i18n";
 import { reportFrontendError } from "./diagnostics";
@@ -621,6 +621,8 @@ function preferenceValues(value: unknown): PreferenceValues {
 
 export function migratePreferenceValues(value: unknown): PreferenceValues {
   const saved = { ...preferenceValues(value) };
+  if (isRetiredTheme(saved.theme)) saved.theme = "system";
+  if (isRetiredTheme(saved.systemDarkScheme)) saved.systemDarkScheme = "dark";
   const legacyAlignment = readMenuAlignment(saved.menuPosition);
   if (legacyAlignment && !readMenuAlignment(saved.mainMenuAlignment)) saved.mainMenuAlignment = legacyAlignment;
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 
-const themes = ["dark", "light", "slate", "classic-blue", "lavender", "emerald", "aurora", "midnight", "sunrise", "graphite"];
+const themes = ["dark", "light", "classic-blue", "lavender", "emerald", "midnight", "sunrise"];
 const names = ["01-first.txt", "02-second.fixture", "03-third.txt", "04-last.txt"];
 const background = "Current marked row background";
 const outline = "Current marked row outline";

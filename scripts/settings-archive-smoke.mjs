@@ -24,7 +24,9 @@ try {
   await page.addInitScript(({ local, evening }) => {
     const key = "dirlume.preferences.v1";
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({
-      layout: "standard", mainMenuAlignment: "right", showMainMenu: false, schemes: [local, evening], activeScheme: null,
+      layout: "standard", mainMenuAlignment: "right", showMainMenu: false, activeScheme: null,
+      theme: "slate", systemDarkScheme: "aurora", showTitlebarScheme: true,
+      schemes: [local, { ...evening, base: "graphite" }],
       kswitcher: "Fixture installation folder",
       viewerContentWidth: 630, viewerMarkdownContentWidth: "full", mermaidScale: 150,
       textTabWidth: 8, showTextWhitespace: true,
@@ -166,7 +168,10 @@ try {
   const fullFile = await exported();
   assert.equal(Object.keys(fullFile.groups).length, groupCount);
   assert.equal(fullFile.groups.appearance.showMainMenu, false);
+  assert.equal(fullFile.groups.appearance.theme, "system");
+  assert.equal(fullFile.groups.appearance.systemDarkScheme, "dark");
   assert.deepEqual(fullFile.schemes.map(({ id }) => id), [local.id, evening.id]);
+  assert.equal(fullFile.schemes[1].base, "dark");
 
   await settingsArchiveAction(options, "Export settings");
   await assertDefaultSelection();
@@ -212,12 +217,34 @@ try {
   await openOptions();
   await button(options, "Appearance").click();
   const scheme = options.getByRole("combobox", { name: "Color scheme", exact: true });
+  const retired = (parent) => parent.locator('option:is([value="aurora"], [value="graphite"], [value="slate"])');
+  assert.equal(await retired(scheme).count(), 0);
+  assert.equal(await retired(page.locator(".topbar-scheme")).count(), 0);
+  const darkFavorite = options.getByRole("combobox", { name: "Favorite dark scheme", exact: true });
+  assert.equal(await darkFavorite.inputValue(), "dark");
+  assert.equal(await retired(darkFavorite).count(), 0);
   const importedScheme = scheme.getByRole("option", { name: standalone.name, exact: true });
   assert.equal(await importedScheme.getAttribute("value"), "custom:single");
   await scheme.selectOption("custom:single");
   await button(options, "Apply").click();
   await page.locator('html[data-theme="sunrise"]').waitFor();
   assert.equal((await readPreferences()).activeScheme, standalone.id);
+  const base = options.getByRole("combobox", { name: "Base theme", exact: true });
+  await base.waitFor();
+  assert.equal(await retired(base).count(), 0);
+
+  const legacyImport = { ...standalone, id: "legacy-dark", name: "Imported legacy palette", base: "aurora" };
+  await startImport(archive({ appearance: { theme: "graphite", systemDarkScheme: "slate", activeScheme: null } }, [legacyImport]));
+  await check(importDialog, legacyImport.name).waitFor();
+  await button(importDialog, "Import").click();
+  await importDialog.waitFor({ state: "hidden" });
+  const imported = await readPreferences();
+  assert.equal(imported.theme, "system");
+  assert.equal(imported.systemDarkScheme, "dark");
+  assert.deepEqual(imported.schemes.find(({ id }) => id === legacyImport.id).colors, legacyImport.colors);
+  assert.equal(imported.schemes.find(({ id }) => id === legacyImport.id).base, "dark");
+  await scheme.selectOption("custom:single");
+  await button(options, "Apply").click();
 
   const other = { ...evening, id: "other", name: "Imported second", colors: { canvas: "#212c33" } };
   const changed = { ...local, id: "source-local", colors: { canvas: "#fafafa" } };
