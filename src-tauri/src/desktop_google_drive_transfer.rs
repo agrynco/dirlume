@@ -313,6 +313,7 @@ async fn copies_google_drive_files_and_nested_folders_in_both_directions() {
     struct Uploaded {
         folders: Vec<(String, String)>,
         uploads: Vec<(String, String, Vec<u8>)>,
+        trashed: Vec<String>,
     }
     #[derive(Clone)]
     struct Fixture {
@@ -328,6 +329,7 @@ async fn copies_google_drive_files_and_nested_folders_in_both_directions() {
         json!({
             "id": id, "name": name, "mimeType": if folder { "application/vnd.google-apps.folder" } else { "text/plain" },
             "size": if folder { None } else { Some("5") },
+            "version": "1",
             "capabilities": { "canDownload": !folder }
         })
     };
@@ -356,6 +358,7 @@ async fn copies_google_drive_files_and_nested_folders_in_both_directions() {
                 move |Query(params): Query<HashMap<String, String>>| async move {
                     let parent = params["q"].split('\'').nth(1).unwrap();
                     let files = match parent {
+                        "relay-target" => vec![],
                         "drive-folder" => vec![metadata("drive-subfolder", "nested", true)],
                         "drive-subfolder" => vec![metadata("drive-file", "test.txt", false)],
                         "partial-folder" => {
@@ -402,7 +405,10 @@ async fn copies_google_drive_files_and_nested_folders_in_both_directions() {
                     };
                     Json(data).into_response()
                 },
-            ),
+            ).patch(|RouteState(state): RouteState<Fixture>, RoutePath(id): RoutePath<String>| async move {
+                state.uploaded.lock().unwrap().trashed.push(id);
+                StatusCode::NO_CONTENT
+            }),
         )
         .route(
             "/drive/v3/files/google-doc/export",
@@ -521,21 +527,156 @@ async fn copies_google_drive_files_and_nested_folders_in_both_directions() {
     .await
     .unwrap();
     assert!(matches!(result, TransferOutcome::Completed));
-    let uploaded = fixture.uploaded.lock().unwrap();
-    assert_eq!(
-        uploaded.folders,
-        [
-            ("root".into(), "uploaded-folder".into()),
-            ("new-0".into(), "nested".into())
-        ]
-    );
-    assert_eq!(
-        uploaded.uploads,
-        [
-            ("root".into(), "uploaded.txt".into(), b"abcde".to_vec()),
-            ("new-1".into(), "test.txt".into(), b"abcde".to_vec())
-        ]
-    );
+    {
+        let uploaded = fixture.uploaded.lock().unwrap();
+        assert_eq!(
+            uploaded.folders,
+            [
+                ("root".into(), "uploaded-folder".into()),
+                ("new-0".into(), "nested".into())
+            ]
+        );
+        assert_eq!(
+            uploaded.uploads,
+            [
+                ("root".into(), "uploaded.txt".into(), b"abcde".to_vec()),
+                ("new-1".into(), "test.txt".into(), b"abcde".to_vec())
+            ]
+        );
+    }
     assert!(dir.join("downloaded-folder/nested/test.txt").is_file());
+    if let Ok(engine) = crate::archive_engine::Engine::find() {
+        use super::remote_provider_transfer::{Endpoint, Relay};
+        use crate::{archive_engine, archives::Archive};
+        let directory = dir.to_owned();
+        tokio::task::spawn_blocking(move || {
+            fs::create_dir(directory.join("inbox")).unwrap();
+            let path = directory.join("relay.zip");
+            let list = archive_engine::list_file(&directory, ["inbox"]).unwrap();
+            let mut command = engine.command("a");
+            command
+                .current_dir(&directory)
+                .arg("-tzip")
+                .arg(archive_engine::at("-i@", &list));
+            archive_engine::archive_args(&mut command, &path);
+            archive_engine::run(&mut command, None, io::sink(), |_| Ok(()))
+                .unwrap()
+                .checked(false)
+                .unwrap();
+            let archive = Mutex::new(Archive::open(engine, path, None).unwrap());
+            let transfer = Arc::new(TransferSession::default());
+            let output = Channel::new(|_| Ok(()));
+            let inbox = vec!["inbox".to_owned()];
+            let name = "test.txt".to_owned();
+            let mut request = TransferRequest {
+                source: TransferSource::GoogleDrive {
+                    profile: uuid::Uuid::nil(),
+                    item: "drive-file".into(),
+                    name: name.clone(),
+                    parent: "root".into(),
+                    folder: false,
+                },
+                destination: "relay.zip!/inbox".into(),
+                ftp_destination: None,
+                ssh_destination: None,
+                server_destination: None,
+                archive_destination: Some(ArchiveDestination {
+                    id: 0,
+                    segments: inbox.clone(),
+                }),
+                kswitcher_destination: None,
+                google_drive_destination: None,
+                kswitcher_broker: false,
+                multiple: true,
+                moving: false,
+                policy: local_transfer::Policy::Skip,
+                ask_read_only: true,
+                retry: false,
+                copy_options: Default::default(),
+            };
+            fn run(
+                request: &TransferRequest,
+                transfer: &Arc<TransferSession>,
+                output: &Channel<TransferEvent>,
+                source: Endpoint<'_>,
+                segments: &[String],
+                destination: Endpoint<'_>,
+            ) -> TransferOutcome {
+                Relay {
+                    request,
+                    transfer,
+                    output,
+                }
+                .run(
+                    source,
+                    segments,
+                    destination,
+                    &mut |_, _, _| Ok(()),
+                    &mut |_| Ok(local_transfer::Decision::Skip),
+                )
+                .unwrap()
+            }
+            assert!(matches!(
+                run(
+                    &request,
+                    &transfer,
+                    &output,
+                    Endpoint::Drive(&drive),
+                    std::slice::from_ref(&name),
+                    Endpoint::Archive(&archive)
+                ),
+                TransferOutcome::Completed
+            ));
+            request.moving = true;
+            assert!(matches!(
+                run(
+                    &request,
+                    &transfer,
+                    &output,
+                    Endpoint::Drive(&drive),
+                    std::slice::from_ref(&name),
+                    Endpoint::Archive(&archive)
+                ),
+                TransferOutcome::Skipped
+            ));
+            assert!(fixture.uploaded.lock().unwrap().trashed.is_empty());
+
+            let archive_item = vec!["inbox".to_owned(), name];
+            request.source = TransferSource::Archive {
+                archive: 0,
+                segments: archive_item.clone(),
+            };
+            request.destination = "Google Drive/Relay".into();
+            request.archive_destination = None;
+            request.google_drive_destination = Some(GoogleDriveDestination {
+                profile: uuid::Uuid::nil(),
+                parent: "relay-target".into(),
+            });
+            assert!(matches!(
+                run(
+                    &request,
+                    &transfer,
+                    &output,
+                    Endpoint::Archive(&archive),
+                    &archive_item,
+                    Endpoint::Drive(&drive)
+                ),
+                TransferOutcome::Completed
+            ));
+            assert!(archive
+                .lock()
+                .unwrap()
+                .list(&inbox)
+                .unwrap()
+                .entries
+                .is_empty());
+            assert_eq!(
+                fixture.uploaded.lock().unwrap().uploads.last(),
+                Some(&("relay-target".into(), "test.txt".into(), b"abcde".to_vec()))
+            );
+        })
+        .await
+        .unwrap();
+    }
     server.abort();
 }

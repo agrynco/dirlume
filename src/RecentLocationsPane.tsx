@@ -15,7 +15,7 @@ function recentSource(location: RecentLocation) {
 }
 
 export function RecentLocationsPane({ side, active, locations, sourceMenu, error, loading, onFocus,
-  onClose, onOpen, onRemove, onClear, onEdit, copyBindings, onCollect }: {
+  onClose, onOpen, onRemove, onClear, onEdit, copyBindings, onCollect, onSelection }: {
   side: Side;
   active: boolean;
   locations: readonly RecentLocation[];
@@ -30,6 +30,7 @@ export function RecentLocationsPane({ side, active, locations, sourceMenu, error
   onEdit: (location: RecentLocation) => void;
   copyBindings: readonly string[];
   onCollect?: (location: RecentLocation) => void;
+  onSelection: (location: RecentLocation | undefined) => void;
 }) {
   const [filter, setFilter] = useState("");
   const [selectedKey, setSelectedKey] = useState("");
@@ -44,6 +45,7 @@ export function RecentLocationsPane({ side, active, locations, sourceMenu, error
   });
   const selected = Math.max(0, visible.findIndex((location) => recentLocationKey(location) === selectedKey));
   const current = visible[selected];
+  useLayoutEffect(() => { onSelection(current); }, [current, onSelection]);
   const rowId = (index: number) => side + "-recent-location-" + index;
   function openCurrent() {
     if (current && !loading) onOpen(current);

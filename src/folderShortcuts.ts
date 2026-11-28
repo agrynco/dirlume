@@ -1,12 +1,20 @@
-import { isFileServer, placePath, windowsClient, type KSwitcherPeer, type Place } from "./api";
+import { isFileServer, mountedSmbPath, placePath, smbHost, windowsClient, type GoogleDrivePlace, type KSwitcherPeer, type Place } from "./api";
+import type { RecentLocation } from "./recentLocations";
 
 export const folderGroups = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 export type FolderGroup = typeof folderGroups[number];
+export type FolderShortcutLocation =
+  | { kind: "smb"; url: string }
+  | { kind: "archive"; file: string; segments: string[] }
+  | { kind: "googleDrive"; id: string; account: string; folders: GoogleDrivePlace["folders"] }
+  | { kind: "lan"; peer: string; name: string; segments: string[] }
+  | { kind: "collection"; folders: string[] };
 export interface FolderShortcut {
   title: string;
   path: string;
   peer?: KSwitcherPeer;
-  remote?: { kind: "ftp" | "ssh" | "server"; id: string; name: string };
+  remote?: { kind: "ftp" | "ssh" | "server"; id: string; name: string; profileId?: string };
+  location?: FolderShortcutLocation;
 }
 export type FolderShortcuts = FolderShortcut[][];
 
@@ -45,11 +53,24 @@ export function normalizeFolderPath(path: string, paired: boolean, remote = fals
 }
 
 export function shortcutFromPlace(place: Place | null): FolderShortcut | undefined {
-  if (place?.kind === "local") return { title: "", path: place.path };
+  if (place?.kind === "local") {
+    const url = place.smb ? mountedSmbPath(place.path, place.smb) : smbHost(place) ? place.path : undefined;
+    return url ? { title: "", path: url, location: { kind: "smb", url } } : { title: "", path: place.path };
+  }
+  if (place?.kind === "archive") return { title: "", path: placePath(place),
+    location: { kind: "archive", file: place.path, segments: place.segments } };
+  if (place?.kind === "googleDrive") {
+    const account = place.email ?? place.address;
+    return { title: "", path: `${account} · ${placePath(place)}`,
+      location: { kind: "googleDrive", id: place.id, account, folders: place.folders } };
+  }
+  if (place?.kind === "server" && place.groupPeer) return { title: "", path: `${place.address} · ${placePath(place)}`,
+    location: { kind: "lan", peer: place.groupPeer, name: place.address, segments: place.segments } };
   if (isFileServer(place) || place?.kind === "server") {
     return {
       title: "", path: placePath(place),
-      remote: { kind: place.kind, id: place.kind === "server" ? place.share : place.profileId, name: place.address },
+      remote: { kind: place.kind, id: place.kind === "server" ? place.share : place.profileId, name: place.address,
+        profileId: place.kind === "server" ? place.profileId : undefined },
     };
   }
   if (place?.kind === "kswitcher" && place.path) {
@@ -57,12 +78,54 @@ export function shortcutFromPlace(place: Place | null): FolderShortcut | undefin
   }
 }
 
+export function shortcutFromRecent(location: RecentLocation): FolderShortcut {
+  const { kind, source } = location;
+  if (kind === "smb" && "path" in location) return { title: "", path: location.path, location: { kind, url: location.path } };
+  if (kind === "kswitcher") return { title: "", path: location.path, peer: { id: location.peer, name: source } };
+  if ("path" in location) return { title: "", path: location.path };
+  return { title: "", path: "/" + location.segments.join("/"),
+    remote: { kind: location.kind, id: location.profileId, name: source,
+      profileId: location.kind === "server" ? location.profileId : undefined } };
+}
+
+function locationIdentity(location: FolderShortcutLocation) {
+  switch (location.kind) {
+    case "smb": return [location.kind, location.url.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase()];
+    case "archive": return [location.kind, windowsClient ? location.file.toLowerCase() : location.file, location.segments];
+    case "googleDrive": return [location.kind, location.id, location.folders.at(-1)?.id ?? "root"];
+    case "lan": return [location.kind, location.peer, location.segments];
+    case "collection": return [location.kind, location.folders];
+  }
+}
+
+export function folderShortcutKey(entry: FolderShortcut) {
+  if (entry.location) return JSON.stringify(locationIdentity(entry.location));
+  const path = normalizeFolderPath(entry.path, !!entry.peer, !!entry.remote);
+  return JSON.stringify([entry.peer?.id, entry.remote?.kind, entry.remote?.id,
+    !entry.remote && (windowsClient || entry.peer) ? path?.toLowerCase() : path]);
+}
+
 export function sameFolderShortcut(a: FolderShortcut, b: FolderShortcut) {
-  if (a.peer?.id !== b.peer?.id || a.remote?.kind !== b.remote?.kind || a.remote?.id !== b.remote?.id) return false;
-  const left = normalizeFolderPath(a.path, !!a.peer, !!a.remote);
-  const right = normalizeFolderPath(b.path, !!b.peer, !!b.remote);
-  return left !== null && right !== null &&
-    (!a.remote && (windowsClient || a.peer) ? left.toLowerCase() === right.toLowerCase() : left === right);
+  return folderShortcutKey(a) === folderShortcutKey(b);
+}
+
+function readLocation(value: unknown): FolderShortcutLocation | undefined {
+  if (!value || typeof value !== "object") return;
+  const fields = value as Record<string, unknown>;
+  const identifier = (value: unknown): value is string => typeof value === "string" && !!value && !value.includes("\0");
+  const components = (value: unknown): value is string[] => Array.isArray(value) && value.every((part) =>
+    identifier(part) && part !== "." && part !== ".." && !part.includes("/"));
+  const { kind, url, file, segments, id, account, folders, peer, name } = fields;
+  switch (kind) {
+    case "smb": if (identifier(url) && /^(smb:\/\/[^/@]+\/|\\\\[^\\@]+\\)/i.test(url)) return { kind, url }; break;
+    case "archive": if (identifier(file) && normalizeFolderPath(file, false) && components(segments)) return { kind, file, segments }; break;
+    case "googleDrive": if (identifier(id) && identifier(account) && Array.isArray(folders) &&
+      folders.every((folder) => folder && identifier(folder.id) && identifier(folder.name))) {
+      return { kind, id, account, folders: folders.map(({ id, name }) => ({ id, name })) };
+    } break;
+    case "lan": if (identifier(peer) && identifier(name) && components(segments) && segments.length) return { kind, peer, name, segments }; break;
+    case "collection": if (components(folders)) return { kind, folders }; break;
+  }
 }
 
 function savedShortcut(value: unknown): FolderShortcut | null {
@@ -70,11 +133,18 @@ function savedShortcut(value: unknown): FolderShortcut | null {
   const item = value as Partial<FolderShortcut>;
   if (typeof item.title !== "string" || typeof item.path !== "string") return null;
   const { peer, remote } = item;
+  if (item.location !== undefined) {
+    const location = readLocation(item.location);
+    return location && !peer && !remote ? { title: item.title, path: item.path, location } : null;
+  }
   if (peer !== undefined && (!peer || typeof peer.id !== "string" || !peer.id || typeof peer.name !== "string")) return null;
   if (remote !== undefined && (!remote || peer || !["ssh", "ftp", "server"].includes(remote.kind) ||
-      typeof remote.id !== "string" || !remote.id || typeof remote.name !== "string")) return null;
+      typeof remote.id !== "string" || !remote.id || typeof remote.name !== "string" ||
+      (remote.profileId !== undefined && typeof remote.profileId !== "string"))) return null;
   const path = normalizeFolderPath(item.path, !!peer, !!remote);
-  return path ? { title: item.title, path, peer, remote } : null;
+  return path ? { title: item.title, path,
+    peer: peer && { id: peer.id, name: peer.name },
+    remote: remote && { kind: remote.kind, id: remote.id, name: remote.name, profileId: remote.profileId } } : null;
 }
 
 export function readFolderShortcuts(): FolderShortcuts {

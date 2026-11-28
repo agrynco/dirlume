@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
+import { openMainMenu } from "./menu-header-smoke.mjs";
 
 const browser = await chromium.launch({ channel: "chrome" });
 try {
@@ -13,7 +14,8 @@ try {
     });
     const home = windows ? "C:\\fixture" : "/fixture";
     await page.addInitScript(({ home }) => {
-      const state = window.driveFixture = { profiles: [], called: [], transfer: null, cancel: null, denied: false, changes: [], added: [], localFolder: "Local folder" };
+      const state = window.driveFixture = { profiles: JSON.parse(sessionStorage.getItem("drive-fixture-profiles") || "[]"),
+        called: [], transfer: null, cancel: null, denied: false, changes: [], added: [], localFolder: "Local folder" };
       const profile = (id, name) => ({ id, label: name, email: id + "@example.test", signInNeeded: false });
       const item = (id, name, fields = {}) => ({
         id, name, directory: false, modified: null, size: 42, download: true, webViewLink: null, ...fields,
@@ -311,12 +313,44 @@ try {
     await dialog().waitFor({ state: "hidden" });
     await row("left", "download.txt").waitFor();
 
+    const bookmarkDialog = page.getByRole("dialog", { name: "Folder shortcuts", exact: true });
+    await list("left").dispatchEvent("keydown", { key: "8", code: "Digit8", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true });
+    await bookmarkDialog.getByRole("textbox", { name: "Title (optional)", exact: true }).fill("Second duplicate folder");
+    await button(bookmarkDialog, "Save").click();
+    await bookmarkDialog.waitFor({ state: "hidden" });
+    await list("right").focus();
+    await (await openMainMenu(page, "Commands")).getByRole("menuitem", { name: "Folder shortcuts", exact: true }).click();
+    await bookmarkDialog.getByRole("button", { name: /^Group 7/ }).click();
+    await button(bookmarkDialog, "Add").click();
+    await bookmarkDialog.getByRole("textbox", { name: "Title (optional)", exact: true }).fill("Work Drive root");
+    await button(bookmarkDialog, "Save").click();
+    await bookmarkDialog.getByRole("option", { name: /^Work Drive root/ }).waitFor();
+    await page.keyboard.press("Escape");
+    const driveShortcuts = await page.evaluate(() => JSON.parse(localStorage.getItem("dirlume.folder-shortcuts.v1")));
+    assert.equal(driveShortcuts[8][0].location.folders.at(-1).id, "second");
+    assert.equal(driveShortcuts[7][0].location.id, "b");
+    assert.deepEqual(driveShortcuts[7][0].location.folders, []);
+    await page.evaluate(() => sessionStorage.setItem("drive-fixture-profiles", JSON.stringify(window.driveFixture.profiles)));
+    await page.reload();
+    const openGroup = async (side, digit) => {
+      await list(side).focus();
+      await page.keyboard.down("ControlRight");
+      await page.keyboard.press(`Digit${digit}`);
+      await page.keyboard.up("ControlRight");
+    };
+    await openGroup("right", 8);
+    await row("right", "download.txt").waitFor();
+    assert.ok((await page.evaluate(() => window.driveFixture.called)).some(([account, folder]) => account === "a" && folder === "second"));
+    await openGroup("left", 7);
+    await row("left", "work.txt").waitFor();
+
     await button(pane("right"), "Open Google Drive connection list").click();
     await row("right", "Renamed").click();
     await list("right").press("F4");
     await button(dialog(), "Remove connection").click();
     await button(dialog(), "Remove connection").click();
-    await row("left", "Work").waitFor();
+    await row("right", "Work").waitFor();
+    await row("left", "work.txt").waitFor();
     assert.equal(await row("left", "Renamed").count(), 0);
     assert.equal(await row("right", "Renamed").count(), 0);
     await page.close();

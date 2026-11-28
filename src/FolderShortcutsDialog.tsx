@@ -5,7 +5,7 @@ import { Dialog } from "./Dialog";
 import { DialogIconButton } from "./DialogActions";
 import { PathField } from "./PathField";
 import { HistoryField } from "./HistoryField";
-import { folderGroups, normalizeFolderPath, sameFolderShortcut, type FolderGroup, type FolderShortcut, type FolderShortcuts } from "./folderShortcuts";
+import { folderGroups, folderShortcutKey, normalizeFolderPath, sameFolderShortcut, type FolderGroup, type FolderShortcut, type FolderShortcuts } from "./folderShortcuts";
 import { countText, t } from "./i18n";
 import { bindingMatches, eventShortcut, showShortcut, type Bindings } from "./preferences";
 
@@ -32,15 +32,14 @@ interface Props {
 export function FolderShortcutsDialog(props: Props) {
   const { screen, shortcuts, onScreen, onSave, onAssigned, onClose } = props;
   if (screen.kind === "groups") {
-    const occupied = folderGroups.filter((group) => shortcuts[group].length > 0);
     return <Dialog title={t("Folder shortcuts")} onClose={onClose} dismissOnOutside>
       <div className="dialog-body command-menu">
-        {occupied.length ? occupied.map((group, index) =>
+        {shortcuts.every((group) => !group.length) && <p>{t("No folder shortcuts saved.")}</p>}
+        {folderGroups.map((group, index) =>
           <Button key={group} type="button" data-initial-focus={index === 0 ? true : undefined}
             onClick={() => onScreen({ kind: "picker", group, selection: 0 })}>
             <span>{t("Group {0}", group)}</span><span>{countText(shortcuts[group].length, "folder")}</span>
-          </Button>
-        ) : <p>{t("No folder shortcuts saved.")}</p>}
+          </Button>)}
       </div>
       <footer className="dialog-footer"><Button type="button" onClick={onClose}>{t("Close")}</Button></footer>
     </Dialog>;
@@ -85,7 +84,7 @@ function FolderShortcutEditor({ group, entry, bridgeDirectory, onSubmit, onClose
 
   function save(event: FormEvent) {
     event.preventDefault();
-    const normalized = normalizeFolderPath(path, !!entry.peer, !!entry.remote);
+    const normalized = entry.location ? entry.path : normalizeFolderPath(path, !!entry.peer, !!entry.remote);
     if (!normalized) {
       setError(t("Enter an absolute folder path on the original computer."));
       return;
@@ -102,7 +101,7 @@ function FolderShortcutEditor({ group, entry, bridgeDirectory, onSubmit, onClose
             maxLength={255} value={title} onValueChange={setTitle} />
         </label>
         <label className="field" htmlFor={id}>{pathLabel}</label>
-        {entry.remote ? <HistoryField id={id} historyKey={"folder-shortcut-path." + entry.remote.id}
+        {entry.location ? <input id={id} value={path} readOnly /> : entry.remote ? <HistoryField id={id} historyKey={"folder-shortcut-path." + entry.remote.id}
           spellCheck={false} value={path} onValueChange={setPath} required /> :
           <PathField id={id} historyKey="folder-shortcut-path" label={pathLabel}
             value={path} onChange={setPath} browse={entry.peer ? undefined : "folder"}
@@ -193,7 +192,7 @@ function FolderShortcutPicker({ screen, shortcuts, currentFolder, bindings, onSc
         {entries.map((entry, index) => {
           const host = entry.remote?.name ?? entry.peer?.name;
           const path = host ? host + " · " + entry.path : entry.path;
-          const key = [entry.remote?.kind, entry.remote?.id ?? entry.peer?.id, entry.path].join(":");
+          const key = folderShortcutKey(entry);
           return <div key={key} id={`${id}-${index}`} role="option"
             className="folder-shortcut-row" aria-selected={index === selection} data-tooltip={path}
             onClick={() => { select(index); list.current?.focus({ preventScroll: true }); }}

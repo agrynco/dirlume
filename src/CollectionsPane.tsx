@@ -6,14 +6,14 @@ import { FileContextMenu } from "./FileContextMenu";
 import { describeError } from "./api";
 import {
   collectionName, collectionReferencePath, collectionTrail, createCollectionFolder, editCollectionEntries,
-  type CollectionEntry, type CollectionFolder,
+  type CollectionEntry, type CollectionFolder, type CollectionReference,
 } from "./collections";
 import { errorText, t } from "./i18n";
 import type { Side } from "./panes";
 import { bindingMatches, eventShortcut, showShortcut, type Bindings } from "./preferences";
 
 export function CollectionsPane({ side, active, collections, path, sourceMenu, loadError, shortcuts,
-  onFocus, onPath, onClose, onChange, onCopy }: {
+  onFocus, onPath, onClose, onChange, onCopy, onMove, onOriginal }: {
   side: Side;
   active: boolean;
   collections: CollectionFolder[];
@@ -26,6 +26,8 @@ export function CollectionsPane({ side, active, collections, path, sourceMenu, l
   onClose: () => void;
   onChange: (collections: CollectionFolder[]) => void;
   onCopy?: (entries: CollectionEntry[]) => void;
+  onMove?: (entries: CollectionEntry[]) => void;
+  onOriginal: (reference: CollectionReference) => void;
 }) {
   const [selected, setSelected] = useState("");
   const [marked, setMarked] = useState<string[]>([]);
@@ -54,6 +56,7 @@ export function CollectionsPane({ side, active, collections, path, sourceMenu, l
 
   function open(entry: CollectionEntry | undefined) {
     if (entry?.kind === "folder") navigate([...trail.map(({ id }) => id), entry.id]);
+    else if (entry?.kind === "reference") onOriginal(entry);
   }
 
   function show(next: typeof action) {
@@ -106,6 +109,7 @@ export function CollectionsPane({ side, active, collections, path, sourceMenu, l
       { match: "recycleAlternate", enabled: targets.length > 0, run: () => show("remove") },
       { match: "delete", enabled: targets.length > 0, run: () => show("remove") },
       { match: "copy", enabled: targets.length > 0 && Boolean(onCopy), run: copy },
+      { match: "move", enabled: targets.length > 0 && Boolean(onMove), run: () => onMove?.(targets) },
       { match: "mark", enabled: Boolean(item), run: () => {
         if (item) setMarked((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id]);
       } },
@@ -178,11 +182,14 @@ export function CollectionsPane({ side, active, collections, path, sourceMenu, l
       <Button disabled={item?.kind !== "folder"} shortcut={showShortcut(shortcuts.rename[0])} onClick={() => show("rename")}>{t("Rename")}</Button>
       <Button disabled={!targets.length} shortcut={showShortcut(shortcuts.recycle[0])} onClick={() => show("remove")}>{t("Remove from collection")}</Button>
       {onCopy && <Button disabled={!targets.length} shortcut={showShortcut(shortcuts.copy[0])} onClick={copy}>{t("Copy")}</Button>}
+      {onMove && <Button disabled={!targets.length} shortcut={showShortcut(shortcuts.move[0])} onClick={() => onMove(targets)}>{t("Move")}</Button>}
     </footer>
     {context && <FileContextMenu {...context} label="Collections"
       onClose={() => setContext(undefined)} onReturn={() => list.current?.focus({ preventScroll: true })}>
       {item?.kind === "folder" && <Button role="menuitem" onClick={() => { setContext(undefined); open(item); }}>{t("Open folder")}</Button>}
+      {item?.kind === "reference" && <Button role="menuitem" onClick={() => { setContext(undefined); open(item); }}>{t("Open original location")}</Button>}
       {onCopy && <Button role="menuitem" onClick={copy}>{t("Copy")}</Button>}
+      {onMove && <Button role="menuitem" onClick={() => { setContext(undefined); onMove(targets); }}>{t("Move")}</Button>}
       {item?.kind === "folder" && <Button role="menuitem" onClick={() => show("rename")}>{t("Rename")}</Button>}
       <Button role="menuitem" onClick={() => show("remove")}>{t("Remove from collection")}</Button>
     </FileContextMenu>}

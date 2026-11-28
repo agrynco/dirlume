@@ -1,11 +1,13 @@
 import { api, connectFtpLocation, mountedSmbPath, smbLocation, windowsClient,
-  type Entry, type FilePlace, type Listing, type TextPlace } from "./api";
+  type Entry, type FilePlace, type GoogleDrivePlace, type Listing, type TextPlace } from "./api";
+import { readPlace } from "./panes";
 import { readRemoteProfiles } from "./savedConnections";
 import type { RecentLocation } from "./recentLocations";
 
 type Origin =
   | { kind: "local"; path: string }
   | { kind: "archive"; path: string; segments: string[] }
+  | { kind: "googleDrive"; profileId: string; account: string; item: string; folders: GoogleDrivePlace["folders"] }
   | { kind: "ftp" | "ssh"; profileId: string; address: string; segments: string[] }
   | { kind: "server"; share?: string; profileId?: string; groupPeer?: string; address: string; segments: string[] }
   | { kind: "kswitcher"; peer: string; address: string; path: string };
@@ -87,6 +89,7 @@ export function collectionReferencePath({ origin, name }: CollectionReference) {
     case "kswitcher": return origin.path.replace(/[/\\]$/, "") +
       (origin.path.includes("\\") ? "\\" : "/") + name;
     case "archive": return origin.path + "!/" + [...origin.segments, name].join("/");
+    case "googleDrive": return origin.account + ":/" + ["My Drive", ...origin.folders.map(({ name }) => name), name].join("/");
     default: return origin.address + " · /" + [...origin.segments, name].join("/");
   }
 }
@@ -102,6 +105,13 @@ export async function resolveCollectionReference(
   let place: TextPlace;
   let listing: Listing;
   switch (origin.kind) {
+    case "googleDrive": {
+      const profile = (await api.googleDriveProfiles()).find(({ id }) => id === origin.profileId);
+      if (!profile || profile.signInNeeded) throw new Error("Reconnect the Google Drive account in the pane sources.");
+      place = { kind: "googleDrive", id: profile.id, address: profile.label, email: profile.email, folders: origin.folders };
+      listing = (await readPlace(place)).listing;
+      break;
+    }
     case "local": {
       if (/^smb:\/\//i.test(origin.path) || origin.path.startsWith("\\\\")) {
         const result = await api.connectSmb(origin.path, null, false);
@@ -179,9 +189,9 @@ export async function resolveCollectionReference(
   }
   if ((place.kind === "ftp" || place.kind === "ssh") && "segments" in origin &&
       JSON.stringify(place.segments) !== JSON.stringify(origin.segments)) throw new Error("The original folder is unavailable.");
-  const entry = listing.entries.find((item) => item.name === name && item.directory === reference.directory);
+  const entry = listing.entries.find((item) => item.name === (origin.kind === "googleDrive" ? origin.item : name) && item.directory === reference.directory);
   if (!entry) throw new Error("The original item is unavailable.");
-  return { place, entry };
+  return { place, entry, listing };
 }
 
 function isCollectionFolder(value: unknown): value is CollectionFolder {
@@ -201,6 +211,9 @@ function isCollectionReference(value: unknown): value is CollectionReference {
   switch (origin.kind) {
     case "local": return typeof origin.path === "string";
     case "archive": return typeof origin.path === "string" && validSegments(origin.segments);
+    case "googleDrive": return typeof origin.profileId === "string" && typeof origin.account === "string" &&
+      typeof origin.item === "string" && Array.isArray(origin.folders) &&
+      origin.folders.every((folder) => folder && typeof folder.id === "string" && typeof folder.name === "string");
     case "ftp":
     case "ssh": return typeof origin.profileId === "string" && typeof origin.address === "string" && validSegments(origin.segments);
     case "server": return (typeof origin.share === "string" || typeof origin.profileId === "string") && typeof origin.address === "string" &&
@@ -230,11 +243,13 @@ export function createCollectionFolder(siblings: CollectionEntry[], value: strin
   return { kind: "folder", id: newId(), name: collectionName(siblings, value), children: [] };
 }
 
-export function collectionReference(place: Exclude<TextPlace, { kind: "googleDrive" }>, entry: Pick<Entry, "name" | "directory">): CollectionReference {
+export function collectionReference(place: TextPlace, entry: Pick<Entry, "name" | "directory" | "googleDrive">): CollectionReference {
   const origin: Origin = (() => {
     switch (place.kind) {
       case "local": return { kind: "local", path: place.smb ? mountedSmbPath(place.path, place.smb) : place.path };
       case "archive": return { kind: "archive", path: place.path, segments: place.segments };
+      case "googleDrive": return { kind: "googleDrive", profileId: place.id, account: place.email ?? place.address,
+        item: entry.name, folders: place.folders };
       case "ftp":
       case "ssh": return { kind: place.kind, profileId: place.profileId, address: place.address, segments: place.segments };
       case "server": return { kind: "server", share: place.share, profileId: place.profileId, groupPeer: place.groupPeer,
@@ -242,7 +257,7 @@ export function collectionReference(place: Exclude<TextPlace, { kind: "googleDri
       case "kswitcher": return { kind: "kswitcher", peer: place.peer, address: place.address, path: place.path };
     }
   })();
-  return { kind: "reference", id: newId(), name: entry.name, directory: entry.directory, origin };
+  return { kind: "reference", id: newId(), name: entry.googleDrive?.name ?? entry.name, directory: entry.directory, origin };
 }
 
 export function collectionReferenceFromRecent(location: RecentLocation): CollectionReference | undefined {
@@ -278,6 +293,7 @@ function referenceKey(reference: CollectionReference) {
       ? JSON.stringify([origin.kind, origin.path.replace(/[\\/]+$/, "").toLowerCase(), name.toLowerCase()])
       : JSON.stringify([origin.kind, origin.path.replace(/\/+$/, ""), name]);
     case "archive": return JSON.stringify([origin.kind, origin.path, origin.segments, name]);
+    case "googleDrive": return JSON.stringify([origin.kind, origin.profileId, origin.item]);
     case "ftp":
     case "ssh": return JSON.stringify([origin.kind, origin.profileId, origin.segments, name]);
     case "server": return JSON.stringify([origin.kind, origin.groupPeer ?? origin.profileId ?? origin.share, origin.segments, name]);
@@ -295,4 +311,40 @@ export function addCollectionReferences(folder: CollectionFolder, references: Co
     added.push(reference);
   }
   return added.length ? { ...folder, children: [...folder.children, ...added] } : folder;
+}
+
+export function copyCollectionEntries(collections: CollectionFolder[], from: string[], into: string[],
+  selected: readonly CollectionEntry[], moving: boolean) {
+  const source = collectionTrail(collections, from);
+  const destination = collectionTrail(collections, into);
+  if (source.length !== from.length || destination.length !== into.length) throw new Error("The original collection folder is unavailable.");
+  if (JSON.stringify(from) === JSON.stringify(into)) throw new Error("Choose a different destination collection folder.");
+  const current = source.at(-1)?.children ?? collections;
+  const ids = new Set(selected.map(({ id }) => id));
+  const items = current.filter(({ id }) => ids.has(id));
+  if (items.length !== ids.size) throw new Error("The original collection item is unavailable.");
+  if (withinSelectedFolder(into, items)) throw new Error("Choose a destination outside the selected collection folders.");
+  if (!into.length && items.some(({ kind }) => kind === "reference")) throw new Error("Open a collection folder first.");
+  function duplicate(item: CollectionEntry): CollectionEntry {
+    return item.kind === "folder" ? { ...item, id: newId(), children: item.children.map(duplicate) } : { ...item, id: newId() };
+  }
+  function add(siblings: CollectionEntry[]) {
+    const updated = siblings.slice();
+    const saved = new Set(siblings.filter((item) => item.kind === "reference").map(referenceKey));
+    for (const item of items) {
+      if (item.kind === "folder") collectionName(updated, item.name);
+      else if (saved.has(referenceKey(item))) {
+        if (moving) throw new Error("The destination already contains a reference to this item.");
+        continue;
+      } else saved.add(referenceKey(item));
+      updated.push(moving ? item : duplicate(item));
+    }
+    return updated;
+  }
+  const result = editCollectionEntries(collections, into, add);
+  return moving ? editCollectionEntries(result, from, (entries) => entries.filter(({ id }) => !ids.has(id))) : result;
+}
+
+function withinSelectedFolder(path: readonly string[], selected: readonly CollectionEntry[]) {
+  return selected.some((entry) => entry.kind === "folder" && path.includes(entry.id));
 }
