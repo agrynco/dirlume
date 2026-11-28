@@ -61,8 +61,30 @@ async function checkGroupedPages(page, side, columns, names) {
     await press(previous);
     await expectAt(offset, coordinate);
   }
+  await press("Shift+ArrowRight");
+  await expectAt(capacity + offset, coordinate);
+  assert.equal(await cursor.evaluate((row) => row.classList.contains("marked")), false);
+  await press("Shift+ArrowLeft");
+  await expectAt(offset, coordinate);
+  assert.equal(await cursor.evaluate((row) => row.classList.contains("marked")), true);
+  await press("Shift+ArrowRight");
+  await expectAt(capacity + offset, coordinate);
+  assert.equal(await cursor.evaluate((row) => row.classList.contains("marked")), true);
+  await press("Shift+ArrowLeft");
+  await expectAt(offset, coordinate);
+  assert.equal(await cursor.evaluate((row) => row.classList.contains("marked")), false);
+
+  await press("Home");
+  await press("Shift+ArrowLeft");
+  await expectAt(0, initial);
+  assert.equal(await cursor.evaluate((row) => row.classList.contains("marked")), false);
   await press("End");
   await expectAt(names.length - 1);
+  for (const marked of [true, false]) {
+    await press("Shift+ArrowRight");
+    await expectAt(names.length - 1);
+    assert.equal(await cursor.evaluate((row) => row.classList.contains("marked")), marked);
+  }
   await press("ArrowRight");
   await press("ArrowDown");
   await expectAt(names.length - 1);
@@ -296,7 +318,19 @@ export async function testBrowserPanelPages(userAgent) {
     await page.goto("http://dirlume.test/");
     const list = (side) => page.locator(`#${side}-files`);
     for (const [side, mode, columns] of [["left", "Brief", 3], ["right", "Medium", 2]]) {
-      await list(side).locator('[data-tooltip="item-000.txt"]').waitFor();
+      const files = list(side);
+      const first = files.locator('[data-tooltip="item-000.txt"]');
+      const cursor = files.locator("[data-current=true]");
+      await first.click();
+      await files.press("ArrowRight");
+      const rightTarget = await cursor.getAttribute("data-tooltip");
+      await files.press("Home");
+      await first.click();
+      await files.press("Shift+ArrowRight");
+      assert.equal(await cursor.getAttribute("data-tooltip"), rightTarget);
+      await files.press("Shift+ArrowLeft");
+      assert.equal(await cursor.getAttribute("data-tooltip"), "..");
+      await files.press("Space");
       const menu = await openMainMenu(page, side === "left" ? "Left" : "Right");
       await menu.getByRole("menuitemradio", { name: mode, exact: true }).click();
       await page.locator("#" + side + "-files[data-paged] .file-row").first().waitFor();
@@ -323,6 +357,9 @@ export async function testBrowserPanelPages(userAgent) {
     await button("Change → for Next page or last item").click();
     await options.getByRole("textbox", { name: "New shortcut to replace → for Next page or last item", exact: true }).press("Alt+ArrowDown");
     await button("Remove PageDown from Next page").click();
+    await button("Change Shift+← for Toggle mark and move left").click();
+    await options.getByRole("textbox", { name: "New shortcut to replace Shift+← for Toggle mark and move left", exact: true }).press("Alt+ArrowUp");
+    await button("Remove Shift+→ from Toggle mark and move right").click();
     await button("Done").click();
     await right.press("Home");
     await right.press("ArrowRight");
@@ -330,7 +367,15 @@ export async function testBrowserPanelPages(userAgent) {
     assert.equal(await right.locator("[data-current=true]").getAttribute("data-tooltip"), "..");
     await right.press("Alt+ArrowDown");
     assert.equal(await right.locator("[data-current=true]").getAttribute("data-tooltip"), fileName(pageSize - 1));
-    console.log("Verified deterministic column and page navigation, resizing, Quick View and shortcut changes.");
+    await right.press("Shift+ArrowRight");
+    await right.press("Shift+ArrowLeft");
+    assert.equal(await right.locator("[data-current=true]").getAttribute("data-tooltip"), fileName(pageSize - 1));
+    assert.equal(await right.locator(".marked").count(), 0);
+    await right.press("Alt+ArrowUp");
+    assert.equal(await right.locator("[data-current=true]").getAttribute("data-tooltip"), "..");
+    await right.press("Alt+ArrowDown");
+    assert.equal(await right.locator("[data-current=true].marked").getAttribute("data-tooltip"), fileName(pageSize - 1));
+    console.log("Verified page navigation and marks, resizing, Quick View, and independent horizontal shortcut changes.");
   } finally {
     await browser.close();
   }

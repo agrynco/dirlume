@@ -64,6 +64,8 @@ export const commands = {
   downRow: { label: "Next item", key: "ArrowDown" },
   selectUpRow: { label: "Extend selection up", key: "Shift+ArrowUp" },
   selectDownRow: { label: "Extend selection down", key: "Shift+ArrowDown" },
+  selectLeftRow: { label: "Toggle mark and move left", key: "Shift+ArrowLeft" },
+  selectRightRow: { label: "Toggle mark and move right", key: "Shift+ArrowRight" },
   firstRow: { label: "First item", key: "Home" },
   lastRow: { label: "Last item", key: "End" },
   leftRow: { label: "Previous page or first item", key: "ArrowLeft" },
