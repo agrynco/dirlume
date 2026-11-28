@@ -1,0 +1,7 @@
+{
+  "version": "0.1.46",
+  "highlights": [
+    "An empty User Menu puts keyboard focus on New command. The launcher uses standard dialog spacing and shows the menu file path during management and review.",
+    "Press Tab to insert a tab character or Shift+Tab to outdent the current or selected lines in Text Editor. Both shortcuts are configurable."
+  ]
+}
