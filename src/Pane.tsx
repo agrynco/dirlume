@@ -194,7 +194,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const tree = !catalog && fileView === "tree";
   const sourceColumns = definition.list.filter(({ field }) => field !== "git" || gitListing);
   const withGit = gitListing && !sourceColumns.some(({ field }) => field === "git") ? sourceColumns.flatMap((column) =>
-    isNameField(column.field) ? [column, { field: "git" as const, width: "7" }] : [column]) : sourceColumns;
+    isNameField(column.field) ? [column, { field: "git" as const, width: "0" }] : [column]) : sourceColumns;
   const columnsInMode = withGit.filter(({ field }) => isNameField(field) || visibility[fieldClass[field]] !== false);
   const modeGroups = panelColumnGroups(columnsInMode);
   const groups = (tree ? modeGroups.slice(0, 1) : modeGroups).map((group) =>
