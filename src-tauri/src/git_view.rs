@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) mod branches;
 pub(crate) mod comparison;
+pub(crate) mod merge;
 pub(crate) mod writes;
 
 #[derive(Debug, Serialize)]

@@ -69,6 +69,34 @@ try {
             assertRoot(args.root);
             if (args.path !== "note.txt" || args.tip !== hash("c")) throw "invalid file revision";
             return "cccccccccccc (Fixture Author 2026-11-21 1) note\n";
+          case "git_merge_plan":
+            assertRoot(args.root);
+            return { review: { headRef: "refs/heads/main", head: hash("a"), sourceRef: args.source, sourceTip: hash("c") },
+              fastForward: false, upToDate: false, changes: [{ status: "M", path: "conflict.txt", previousPath: null }] };
+          case "git_merge_state":
+            assertRoot(args.root);
+            return window.gitMerge ?? null;
+          case "git_start_merge":
+            assertRoot(args.root);
+            if (args.review.sourceRef !== "refs/remotes/origin/topic" || args.mode !== "mergeCommit") throw "wrong reviewed branch";
+            window.gitMerge = { session: { head: hash("a"), sources: [hash("c")] }, conflicts: [
+              { path: "conflict.txt", base: { mode: "100644", oid: hash("a") },
+                ours: { mode: "100644", oid: hash("b") }, theirs: { mode: "100644", oid: hash("c") } },
+            ] };
+            return null;
+          case "git_inspect_merge":
+            assertRoot(args.root);
+            return { base: { text: "base fixture", fallback: null }, ours: { text: "ours fixture", fallback: null },
+              theirs: { text: "theirs fixture", fallback: null }, workingPath: null };
+          case "git_resolve_merge":
+            assertRoot(args.root);
+            if (args.resolution !== "theirs" || args.conflict.path !== "conflict.txt") throw "wrong resolution";
+            window.gitMerge.conflicts = [];
+            return null;
+          case "git_finish_merge":
+            assertRoot(args.root);
+            window.gitMerge = null;
+            return null;
           case "git_history":
             if (args.tip === hash("b")) return new Promise((resolve) => {
               window.finishOldHistory = () => resolve({ commits: [commit("b", "Stale local topic")], nextOffset: null });
@@ -203,6 +231,24 @@ try {
   const tracking = page.getByRole("dialog", { name: "Create tracking branch and switch", exact: true });
   assert.equal(await tracking.getByRole("textbox", { name: "Branch name", exact: true }).inputValue(), "topic");
   await button(tracking, "Cancel").click();
+  await button(history, "Merge branch").click();
+  await history.getByText("refs/remotes/origin/topic", { exact: false }).waitFor();
+  assert.equal(await button(history, "Fast-forward only").isDisabled(), true);
+  await button(history, "Create merge commit").click();
+  await button(page.getByRole("dialog", { name: "Create merge commit", exact: true }), "Create merge commit").click();
+  await history.getByText("ours fixture", { exact: true }).waitFor();
+  assert.equal(await button(history, "Continue merge").isDisabled(), true);
+  await button(branches, "Close Git View").click();
+  await git.click();
+  await history.getByText("ours fixture", { exact: true }).waitFor();
+  await button(history, "Theirs").click();
+  await history.getByText("theirs fixture", { exact: true }).waitFor();
+  await button(history, "Use theirs").click();
+  await button(page.getByRole("dialog", { name: "Use theirs", exact: true }), "Use theirs").click();
+  await history.getByText("All conflicts are resolved.", { exact: true }).waitFor();
+  await button(history, "Continue merge").click();
+  await button(page.getByRole("dialog", { name: "Continue merge", exact: true }), "Continue merge").click();
+  await history.getByText("Select a source branch to merge.", { exact: true }).waitFor();
   await button(branches, "Changes").click();
   const changes = page.getByRole("region", { name: "Changes", exact: true });
   const preview = page.getByRole("region", { name: "Change preview", exact: true });
