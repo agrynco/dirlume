@@ -448,6 +448,20 @@ export interface GitDetails {
   changes: { status: string; path: string; previousPath: string | null }[];
 }
 
+export interface GitFileCommit extends GitCommit {
+  parent: string | null;
+  merge: boolean;
+  change: GitDetails["changes"][number];
+}
+
+export type GitFileContent = { state: "available"; text: string } | { state: "missing" | "binary" | "oversized" };
+
+export interface GitFileRevision {
+  revision: string;
+  path: string;
+  content: GitFileContent;
+}
+
 export interface GitComparison {
   base: string;
   target: string;
@@ -814,7 +828,9 @@ export const api = {
   gitGraphUpstream: (root: string, reference: string) =>
     invoke<{ reference: string; tip: string } | null>("git_graph_upstream", { root, reference }),
   gitFileHistory: (root: string, tip: string, path: string, offset: number) =>
-    invoke<GitHistory>("git_file_history", { root, tip, path, offset }),
+    invoke<{ commits: GitFileCommit[]; nextOffset: number | null }>("git_file_history", { root, tip, path, offset }),
+  gitFileRevision: (root: string, revision: string, path: string) =>
+    invoke<GitFileRevision>("git_file_revision", { root, revision, path }),
   gitFileBlame: (root: string, tip: string, path: string) =>
     invoke<string>("git_file_blame", { root, tip, path }),
   gitDetails: (root: string, hash: string) => invoke<GitDetails>("git_details", { root, hash }),

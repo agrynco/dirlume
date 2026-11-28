@@ -7,6 +7,7 @@ import { Dialog } from "./Dialog";
 import { GitActionButtons, GitActionMenuProvider, useGitMenu, type GitAction } from "./GitActions";
 import { GitChanges } from "./GitChanges";
 import { GitCommitGraph } from "./GitCommitGraph";
+import { GitFileHistory } from "./GitFileHistory";
 import { writeError } from "./gitWriteError";
 import { GitHistoryTools, type HistoryAction } from "./GitHistoryTools";
 import { GitMerge, gitOperationStatus } from "./GitMerge";
@@ -108,8 +109,8 @@ function ChangeDetails({ root, commit, onTarget, inspect }: {
   </section>;
 }
 
-function History({ root, tip, file, onTarget, inspect }: {
-  root: string; tip?: string; file?: string; onTarget: (hash: string) => void; inspect: InspectCommit;
+function History({ root, tip, onTarget, inspect }: {
+  root: string; tip?: string; onTarget: (hash: string) => void; inspect: InspectCommit;
 }) {
   const menu = useGitMenu();
   const [result, setResult] = useState<GitHistory>({ commits: [], nextOffset: tip ? 0 : null });
@@ -119,8 +120,7 @@ function History({ root, tip, file, onTarget, inspect }: {
   useEffect(() => {
     if (!tip || !request) return;
     let canceled = false;
-    const query = file ? api.gitFileHistory(root, tip, file, request.offset) : api.gitHistory(root, tip, request.offset);
-    void query.then((page) => {
+    void api.gitHistory(root, tip, request.offset).then((page) => {
       if (!canceled) setResult((current) => ({
         commits: request.offset === 0 ? page.commits : [...current.commits, ...page.commits], nextOffset: page.nextOffset,
       }));
@@ -130,7 +130,7 @@ function History({ root, tip, file, onTarget, inspect }: {
       if (!canceled) setRequest(null);
     });
     return () => { canceled = true; };
-  }, [root, tip, file, request]);
+  }, [root, tip, request]);
   const formatDate = useTimestamps(result.commits.map(({ date }) => Math.floor(Date.parse(date) / 1000)));
   return <div className="git-history git-scroll">
     {result.commits.map((commit) => <div className="git-commit" key={commit.hash}>
@@ -168,32 +168,6 @@ function Blame({ root, tip, path }: { root: string; tip: string; path: string })
   return result
     ? <pre className="git-patch" tabIndex={0} aria-label={t("Blame")}>{result}</pre>
     : <p>{t("This file has no lines.")}</p>;
-}
-
-function FileRevision({ root, tip, onTarget, initial, inspect }: {
-  root: string; tip: string; onTarget: (hash: string) => void; initial?: HistoricalPath; inspect: InspectCommit;
-}) {
-  const menu = useGitMenu();
-  const [path, setPath] = useState(initial?.path ?? "");
-  const [opened, setOpened] = useState<{ path: string; mode: "history" | "blame" } | undefined>(initial);
-  const actions: GitAction[] = [
-    { label: "Show history", icon: FileClock, disabled: !path, submit: true, run: () => setOpened({ path, mode: "history" }) },
-    { label: "Show blame", icon: Search, disabled: !path, run: () => setOpened({ path, mode: "blame" }) },
-  ];
-  return <div className="git-scroll git-revision-comparison" tabIndex={-1} {...menu(actions)}>
-    <form onSubmit={(event) => {
-      event.preventDefault();
-      if (path) setOpened({ path, mode: "history" });
-    }}>
-      <label className="field">{t("Path relative to the repository")}
-        <input value={path} onChange={(event) => setPath(event.target.value)} required spellCheck={false} autoComplete="off" />
-      </label>
-      <GitActionButtons actions={actions} />
-    </form>
-    {opened && (opened.mode === "history"
-      ? <History key={opened.path} root={root} tip={tip} file={opened.path} onTarget={onTarget} inspect={inspect} />
-      : <Blame key={opened.path} root={root} tip={tip} path={opened.path} />)}
-  </div>;
 }
 
 export default function GitView(props: GitViewProps & { menuShortcut: readonly string[] }) {
@@ -237,7 +211,8 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
   const filterField = useRef<HTMLInputElement>(null);
   const branches = useRef<HTMLDivElement>(null);
   const knownRepository = useRef<{ path: string; root: string }>(null);
-  useLayoutEffect(() => { if (!changes) filterField.current?.focus(); }, [changes]);
+  const fileHistoryOpen = historyMode === "file";
+  useLayoutEffect(() => { if (!changes && !fileHistoryOpen) filterField.current?.focus(); }, [changes, fileHistoryOpen]);
   useEffect(() => {
     let canceled = false;
     setError("");
@@ -443,11 +418,21 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
     {repository && <strong>{repository.name}</strong>}
     <span title={repository?.root ?? path}>{repository?.root ?? path}</span>
   </div>;
+  const historyHeader = <header className="pane-heading git-history-heading" {...menu([refreshAction, ...historyActions])}>
+    <span className="pane-title"><GitCommitHorizontal aria-hidden="true" />{t("Commit history")}</span>
+    {repository && <span className="git-ref">{branch?.name ?? allBranches.find(({ reference }) => reference === checkedOut)?.name}</span>}
+    <div className="git-history-actions"><GitActionButtons actions={historyActions} /></div>
+  </header>;
   if (changes && repository && !error) return <GitChanges key={repository.root} root={repository.root}
     side={side} refresh={refresh} selected={selectedChange} onSelect={setSelectedChange} header={header} paneActions={paneActions}
     repository={location} onOpen={onOpen} canEdit={canEdit} onRefresh={onRefresh}
     draft={draft?.root === repository.root ? draft.message : ""}
     onDraft={(message) => setDraft({ root: repository.root, message })} />;
+  const fileTip = fileTarget?.tip ?? tip;
+  if (fileHistoryOpen && repository && fileTip) return <GitFileHistory key={JSON.stringify([repository.root, fileTarget])}
+    repository={repository} tip={fileTip} side={side} initial={fileTarget} refresh={refresh} historyHeader={historyHeader}
+    previewControls={<GitActionButtons actions={[refreshAction, closeAction]} />} commitActions={inspect.actions}
+    renderBlame={(path) => <Blame key={JSON.stringify([path, fileTip, refresh])} root={repository.root} tip={fileTip} path={path} />} />;
 
   return <>
     <section className={"pane git-pane git-pane-" + side} aria-label={t(changes ? "Changes" : "Branches")} data-help-topic="gitView" data-pane-side={side}
@@ -478,13 +463,7 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
     </section>
     <section className={"pane git-pane git-pane-" + opposite(side)} aria-label={t("Commit history")} data-help-topic="gitView" data-pane-side={opposite(side)}
       tabIndex={-1} {...menu([refreshAction, ...historyActions])}>
-      <header className="pane-heading git-history-heading">
-        <span className="pane-title"><GitCommitHorizontal aria-hidden="true" />{t("Commit history")}</span>
-        {repository && <span className="git-ref">{branch?.name ?? allBranches.find(({ reference }) => reference === checkedOut)?.name}</span>}
-        <div className="git-history-actions">
-          <GitActionButtons actions={historyActions} />
-        </div>
-      </header>
+      {historyHeader}
       {repository && !changes && (historyMode === "merge"
         ? <GitMerge key={repository.root} root={repository.root} source={pull?.method === "merge" ? pull.upstream :
           branch && selected !== checkedOut ? branch.reference : ""}
@@ -512,9 +491,6 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
             repository={repository} tip={tip} branch={branch} commitActions={inspect.actions}
             renderDetails={(commit) => <ChangeDetails root={repository.root} commit={commit}
               onTarget={useHistoryTarget} inspect={inspect} />} />
-          : historyMode === "file" && (fileTarget || tip)
-            ? <FileRevision key={JSON.stringify([fileTarget, tip, refresh])} root={repository.root}
-              tip={fileTarget?.tip ?? tip!} initial={fileTarget} onTarget={useHistoryTarget} inspect={inspect} />
           : <History key={selected + ":" + (tip ?? "") + ":" + refresh} root={repository.root}
             tip={tip} onTarget={useHistoryTarget} inspect={inspect} />)}
     </section>

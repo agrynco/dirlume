@@ -122,8 +122,27 @@ try {
           }
           case "git_file_history":
             assertRoot(args.root);
-            if (args.path !== "note.txt") throw "invalid path";
-            return { commits: [commit("c", "Edited tracked note")], nextOffset: null };
+            if (args.path !== "note.txt" || args.tip !== hash("c")) throw "invalid file history";
+            if (args.offset) return { commits: [{ ...commit("d", "Added original note"), parent: null, merge: false,
+              change: { status: "A", path: "old-note.txt", previousPath: null } }], nextOffset: null };
+            return { commits: [
+              { ...commit("c", "Edited tracked note"), parent: hash("b"), merge: false,
+                change: { status: "M", path: "note.txt", previousPath: null } },
+              { ...commit("b", "Renamed tracked note"), parent: hash("d"), merge: false,
+                change: { status: "R100", path: "note.txt", previousPath: "old-note.txt" } },
+            ], nextOffset: 2 };
+          case "git_file_revision": {
+            assertRoot(args.root);
+            const revision = args.revision === "refs/heads/main" ? hash("a") : args.revision;
+            if (window.holdFileRevision && revision === hash("c")) return new Promise((resolve) => {
+              window.finishFileRevision = () => resolve({ revision, path: args.path, content: {
+                state: "available", text: "Late response for another row",
+              } });
+            });
+            const available = revision === hash("d") ? args.path === "old-note.txt" : args.path === "note.txt";
+            return { revision, path: args.path, content: available ? { state: "available", text: revision === hash("c") ? "Edited line" :
+              revision === hash("a") ? "Alternate line" : "Original line" } : { state: "missing" } };
+          }
           case "git_file_blame":
             assertRoot(args.root);
             if (args.path !== "note.txt" || args.tip !== hash("c")) throw "invalid file revision";
@@ -551,9 +570,41 @@ try {
   await button(history, "File history").click();
   await history.getByRole("textbox", { name: "Path relative to the repository", exact: true }).fill("note.txt");
   await button(history, "Show history").click();
-  await history.getByRole("button", { name: /Edited tracked note/ }).waitFor();
+  const revisionPreview = page.getByRole("region", { name: "File revision preview", exact: true });
+  const editedRevision = history.getByRole("option", { name: /Edited tracked note/ });
+  const renamed = history.getByRole("option", { name: /Renamed tracked note/ });
+  await editedRevision.waitFor();
+  await revisionPreview.getByText("Parent revision", { exact: true }).waitFor();
+  await revisionPreview.getByLabel("Side-by-side revision diff").waitFor();
+  await editedRevision.press("ArrowDown");
+  assert.equal(await renamed.getAttribute("aria-selected"), "true");
+  await revisionPreview.getByText("old-note.txt", { exact: true }).waitFor();
+  await revisionPreview.getByText("The file contents are identical.", { exact: true }).waitFor();
+  await page.evaluate(() => { window.holdFileRevision = true; });
+  await renamed.press("ArrowUp");
+  await page.waitForFunction(() => typeof window.finishFileRevision === "function");
+  await editedRevision.press("ArrowDown");
+  await page.evaluate(() => { window.finishFileRevision(); window.holdFileRevision = false; });
+  await revisionPreview.getByText("The file contents are identical.", { exact: true }).waitFor();
+  assert.equal(await revisionPreview.getByText("Late response for another row").count(), 0);
+  await button(revisionPreview, "Show revision").click();
+  const revisionDocument = page.getByRole("dialog", { name: "Show revision" });
+  assert.equal(await revisionDocument.getByLabel("File revision text").textContent(), "Original line");
+  await revisionDocument.press("Escape");
+  assert.equal(await renamed.getAttribute("aria-selected"), "true");
+  await button(revisionPreview, "Compare with revision…").click();
+  const fileComparison = page.getByRole("dialog", { name: "Compare with revision…" });
+  await fileComparison.getByRole("combobox", { name: "Comparison revision", exact: true }).selectOption("refs/heads/main");
+  await button(fileComparison, "Compare").click();
+  await revisionPreview.getByText("Comparison revision", { exact: true }).waitFor();
+  await revisionPreview.getByLabel("Side-by-side revision diff").waitFor();
+  await button(revisionPreview, "Show parent comparison").click();
+  await button(history, "Load more").click();
+  await history.getByRole("option", { name: /Added original note/ }).click();
+  await revisionPreview.getByText("Empty tree", { exact: true }).waitFor();
+  await revisionPreview.getByText("File absent at this revision.", { exact: true }).waitFor();
   await button(history, "Show blame").click();
-  await history.getByLabel("Blame", { exact: true }).filter({ hasText: "Fixture Author" }).waitFor();
+  await revisionPreview.getByLabel("Blame", { exact: true }).filter({ hasText: "Fixture Author" }).waitFor();
   await button(history, "File history").click();
   await button(branches, "Create tracking branch and switch").click();
   const tracking = page.getByRole("dialog", { name: "Create tracking branch and switch", exact: true });
