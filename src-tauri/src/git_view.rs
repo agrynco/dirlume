@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) mod branches;
 pub(crate) mod comparison;
+pub(crate) mod graph;
 pub(crate) mod history_edits;
 pub(crate) mod merge;
 pub(crate) mod rebase;
@@ -434,27 +435,6 @@ fn blame(git: &Path, root: &Path, tip: &str, path: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&lines).into_owned())
 }
 
-fn commit_graph(git: &Path, root: &Path, tip: &str, search: &str) -> Result<String> {
-    let tip = oid(tip)?;
-    let mut args = vec![
-        "log",
-        "--graph",
-        "--topo-order",
-        "--no-color",
-        "--no-notes",
-        "--no-show-signature",
-        "--max-count=250",
-        "--format=%h %s",
-    ];
-    let grep = format!("--grep={search}");
-    if !search.is_empty() {
-        args.extend(["--fixed-strings", "--regexp-ignore-case", &grep]);
-    }
-    args.extend([tip, "--"]);
-    let text = bounded(git, root, &args, PATCH_LIMIT)?.ok_or(GitError::Unreadable)?;
-    Ok(String::from_utf8_lossy(&text).into_owned())
-}
-
 fn details(git: &Path, path: &Path, hash: &str) -> Result<Details> {
     let hash = oid(hash)?;
     let header = success(run(
@@ -762,11 +742,6 @@ pub async fn git_repository(path: String) -> Result<Repository> {
 #[tauri::command]
 pub async fn git_history(root: String, tip: String, offset: u32) -> Result<History> {
     query(move || history(&executable()?, directory(&root)?, &tip, offset)).await
-}
-
-#[tauri::command]
-pub async fn git_commit_graph(root: String, tip: String, search: String) -> Result<String> {
-    query(move || commit_graph(&executable()?, directory(&root)?, &tip, search.trim())).await
 }
 
 #[tauri::command]

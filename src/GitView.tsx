@@ -6,6 +6,7 @@ import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { GitActionButtons, GitActionMenuProvider, useGitMenu, type GitAction } from "./GitActions";
 import { GitChanges } from "./GitChanges";
+import { GitCommitGraph } from "./GitCommitGraph";
 import { writeError } from "./gitWriteError";
 import { GitHistoryTools, type HistoryAction } from "./GitHistoryTools";
 import { GitMerge, gitOperationStatus } from "./GitMerge";
@@ -150,37 +151,6 @@ function History({ root, tip, file, onTarget, inspect }: {
       setError("");
       if (result.nextOffset !== null) setRequest({ offset: result.nextOffset });
     }}>{t(error ? "Retry" : "Load more")}</Button>}
-  </div>;
-}
-
-function CommitGraph({ root, tip }: { root: string; tip: string }) {
-  const [search, setSearch] = useState("");
-  const [query, setQuery] = useState("");
-  const [graph, setGraph] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let canceled = false;
-    void api.gitCommitGraph(root, tip, query).then((value) => {
-      if (!canceled) setGraph(value);
-    }, (error: unknown) => { if (!canceled) setError(gitError(error)); });
-    return () => { canceled = true; };
-  }, [root, tip, query]);
-  return <div className="git-scroll git-revision-comparison">
-    <form onSubmit={(event) => {
-      event.preventDefault();
-      if (search.trim() === query) return;
-      setGraph(null);
-      setError("");
-      setQuery(search.trim());
-    }}>
-      <label className="field">{t("Search commit messages")}
-        <input type="search" maxLength={200} value={search} onChange={(event) => setSearch(event.target.value)} />
-      </label>
-      <Button type="submit">{t("Search")}</Button>
-    </form>
-    {error ? <p role="alert">{error}</p> : graph === null ? <p role="status">{t("Loading commits…")}</p> :
-      graph ? <><p>{t("Showing up to 250 commits.")}</p><pre className="git-patch" tabIndex={0}
-        aria-label={t("Commit graph")}>{graph}</pre></> : <p>{t("No matching commits.")}</p>}
   </div>;
 }
 
@@ -538,7 +508,10 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
           onCopyPath={(path) => copy(path, "Path copied to the clipboard.")}
           renderDetails={(commit) => <ChangeDetails root={repository.root} commit={commit} onTarget={useHistoryTarget} inspect={inspect} />} />
         : historyMode === "graph" && tip
-          ? <CommitGraph key={tip + ":" + refresh} root={repository.root} tip={tip} />
+          ? <GitCommitGraph key={JSON.stringify([repository.root, selected, tip, refresh])}
+            repository={repository} tip={tip} branch={branch} commitActions={inspect.actions}
+            renderDetails={(commit) => <ChangeDetails root={repository.root} commit={commit}
+              onTarget={useHistoryTarget} inspect={inspect} />} />
           : historyMode === "file" && (fileTarget || tip)
             ? <FileRevision key={JSON.stringify([fileTarget, tip, refresh])} root={repository.root}
               tip={fileTarget?.tip ?? tip!} initial={fileTarget} onTarget={useHistoryTarget} inspect={inspect} />

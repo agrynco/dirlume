@@ -12,17 +12,19 @@ const fallbackLabels = {
   unsupported: "A text diff is unavailable for this change.",
 };
 
-function RevisionInput({ label, initial, repository }: { label: string; initial?: string; repository: GitRepository }) {
+export function RevisionInput({ label, initial, repository, choiceName, exact = false }: {
+  label: string; initial?: string; repository: GitRepository; choiceName?: string; exact?: boolean;
+}) {
   const options = repository.branches.map(({ name, reference, tip }) => ({ name, reference, value: tip }));
   const tags = repository.tags ?? [];
-  const [kind, setKind] = useState(() => options.find(({ reference }) => reference === initial)?.reference ??
+  const [kind, setKind] = useState(() => exact ? "" : options.find(({ reference }) => reference === initial)?.reference ??
     options.find(({ value }) => value === initial)?.reference ??
     tags.find(({ reference }) => reference === initial)?.reference ?? (initial && initial === repository.head ? "HEAD" : ""));
   const value = options.find(({ reference }) => reference === kind)?.value ??
     (kind === "HEAD" ? repository.head ?? "" : kind);
   return <div>
     <label className="field">{t(label)}
-      <select value={kind} onChange={(event) => setKind(event.target.value)}>
+      <select name={choiceName} value={kind} onChange={(event) => setKind(event.target.value)}>
         {repository.head && !options.some(({ value }) => value === repository.head) &&
           <option value="HEAD">{t("Checked out")}</option>}
         <optgroup label={t("Branches")}>

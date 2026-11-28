@@ -177,7 +177,7 @@ Right-click an item in Git View to open its actions, or right-click a pane's bac
 
 Choose **Compare revisions** in the history pane to compare two branches, tags, or full commit IDs. Each side lists its unique commits. Select a changed path for an inline diff from base to target. Comparing leaves the checkout, index, and working files intact.
 
-Open **Commit graph** for the selected branch and search commit messages. Open **File history** and enter a repository-relative path to see the file's commits or line authorship at that revision.
+Open **Commit graph** to browse the selected branch, see its parent links and reference labels, and expand commit details. Choose **Show upstream** for incoming and outgoing commits or **Compare revisions in graph** to compare two local revisions. Search commit messages across the active history and use **Load more** for older matches. Open **File history** and enter a repository-relative path to see the file's commits or line authorship at that revision.
 
 The branch pane can create a local branch at the selected commit, switch to an existing local branch, rename or safely delete a local branch, or create and switch to a local branch that tracks the selected remote branch. Review the repository and branch in the dialog before applying an action. Git checks whether local changes can be preserved on switch and whether deletion is safe.
 

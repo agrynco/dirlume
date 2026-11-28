@@ -429,6 +429,18 @@ export interface GitHistory {
   nextOffset: number | null;
 }
 
+export interface GitGraphCommit extends GitCommit {
+  parents: string[];
+  side: "base" | "target" | "shared" | null;
+}
+
+export interface GitGraphPage {
+  base: string;
+  target: string | null;
+  commits: GitGraphCommit[];
+  nextOffset: number | null;
+}
+
 export interface GitDetails {
   message: string;
   merge: boolean;
@@ -797,8 +809,10 @@ export const api = {
   cancelSpaceScan: (id: string) => invoke<void>("cancel_space_scan", { id }),
   gitRepository: (path: string) => invoke<GitRepository>("git_repository", { path }),
   gitHistory: (root: string, tip: string, offset: number) => invoke<GitHistory>("git_history", { root, tip, offset }),
-  gitCommitGraph: (root: string, tip: string, search: string) =>
-    invoke<string>("git_commit_graph", { root, tip, search }),
+  gitCommitGraph: (root: string, request: { base: string; target: string | null; search: string; offset: number }) =>
+    invoke<GitGraphPage>("git_commit_graph", { root, request }),
+  gitGraphUpstream: (root: string, reference: string) =>
+    invoke<{ reference: string; tip: string } | null>("git_graph_upstream", { root, reference }),
   gitFileHistory: (root: string, tip: string, path: string, offset: number) =>
     invoke<GitHistory>("git_file_history", { root, tip, path, offset }),
   gitFileBlame: (root: string, tip: string, path: string) =>
