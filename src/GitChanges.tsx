@@ -50,13 +50,6 @@ function Preview({ root, change, actions, fileActions, unavailable, compareShort
   const commands = [...(actions ?? []), ...(diff && fileActions ? fileActions(diff) : [])];
   const comparison = change.group === "staged" ? diff?.unborn ? "Empty tree → Index" : "HEAD → Index" :
     change.group === "unstaged" ? "Index → Working file" : "New working file";
-  const [before, after] = diff?.versions ? [diff.versions.left, diff.versions.right] : [];
-  const showVersions = before && after && (before.state !== "missing" || after.state !== "missing");
-  const contentFailure = [before, after].find((item) => item?.state === "binary" || item?.state === "oversized")?.state;
-  const beforeLabel = change.group === "staged" ? diff?.unborn ? "Empty tree" : "HEAD" :
-    change.group === "unstaged" ? "Index" : "Empty tree";
-  const afterLabel = change.group === "staged" ? "Index" : "Working file";
-  const heading = (label: string, path: string) => <div className="git-file-version-heading"><strong>{t(label)}</strong><span>{path}</span></div>;
   return <>
     <div className="git-change-summary" {...menu(commands, changeLabel(change))}>
       <strong>{changeLabel(change)}</strong>
@@ -68,18 +61,32 @@ function Preview({ root, change, actions, fileActions, unavailable, compareShort
     </div>
     {error ? <p className="pane-empty git-error" role="alert">{t("Could not read this change.")}</p> :
       !diff ? <p className="pane-empty" role="status">{t("Reading change…")}</p> :
-      diff.fallback ? <p className="pane-empty">{t(fallbacks[diff.fallback])}</p> :
-      contentFailure === "binary" || contentFailure === "oversized" ? <p className="pane-empty">{t(fallbacks[contentFailure])}</p> :
-      compareShortcuts && showVersions ? <ReadOnlyFileComparison {...compareShortcuts}
-        markIdentical={before.state === "available" && after.state === "available"}
-        left={{ text: before.state === "available" ? before.text : "", heading: heading(beforeLabel, change.previousPath ?? change.path) }}
-        right={{ text: after.state === "available" ? after.text : "", heading: heading(afterLabel, change.path) }} /> :
-      <pre className="git-patch" tabIndex={0} aria-label={t("Inline diff")} {...menu(commands, changeLabel(change))}><code>
-        {(diff.patch ?? "").match(/[^\n]*\n|[^\n]+$/g)?.map((line, index) =>
-          <span key={index} data-diff={line.startsWith("+") && !line.startsWith("+++") ? "added" :
-            line.startsWith("-") && !line.startsWith("---") ? "removed" : undefined}>{line}</span>)}
-      </code></pre>}
+      <WorkingFileComparison diff={diff} change={change} compareShortcuts={compareShortcuts} commands={commands} />}
   </>;
+}
+
+function WorkingFileComparison({ diff, change, compareShortcuts, commands = [] }: {
+  diff: GitWorkingDiff; change: GitWorkingChange; compareShortcuts?: ComparisonShortcuts; commands?: GitAction[];
+}) {
+  const menu = useGitMenu();
+  const { left: before, right: after } = diff.versions ?? {};
+  const contentFailure = [before, after].find((item) => item?.state === "binary" || item?.state === "oversized")?.state;
+  const unavailable = diff.fallback ?? (contentFailure === "binary" || contentFailure === "oversized" ? contentFailure : null);
+  if (unavailable) return <p className="pane-empty">{t(fallbacks[unavailable])}</p>;
+  if (compareShortcuts && before && after && (before.state !== "missing" || after.state !== "missing")) {
+    const beforeLabel = change.group === "staged" ? diff.unborn ? "Empty tree" : "HEAD" :
+      change.group === "unstaged" ? "Index" : "Empty tree";
+    const afterLabel = change.group === "staged" ? "Index" : "Working file";
+    const heading = (label: string, path: string) => <div className="git-file-version-heading"><strong>{t(label)}</strong><span>{path}</span></div>;
+    return <ReadOnlyFileComparison {...compareShortcuts} markIdentical={before.state === "available" && after.state === "available"}
+      left={{ text: before.state === "available" ? before.text : "", heading: heading(beforeLabel, change.previousPath ?? change.path) }}
+      right={{ text: after.state === "available" ? after.text : "", heading: heading(afterLabel, change.path) }} />;
+  }
+  return <pre className="git-patch" tabIndex={0} aria-label={t("Inline diff")} {...menu(commands, changeLabel(change))}><code>
+    {(diff.patch ?? "").match(/[^\n]*\n|[^\n]+$/g)?.map((line, index) =>
+      <span key={index} data-diff={line.startsWith("+") && !line.startsWith("+++") ? "added" :
+        line.startsWith("-") && !line.startsWith("---") ? "removed" : undefined}>{line}</span>)}
+  </code></pre>;
 }
 
 function BulkSelection({ root, index, onClose, onRefresh }: {
@@ -473,7 +480,7 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, pa
           disabled={!!pending} onClick={() => setReviewPath(changeId(row))}>{changeLabel(row)}</Button></li>)}
       </ul>
       {selectedReview && <div className="git-commit-diff">
-        <Preview key={reviewPath} root={root} change={selectedReview} />
+        <Preview key={reviewPath} root={root} change={selectedReview} compareShortcuts={compareShortcuts} />
       </div>}
       <label className="field">{t("Commit message")}
         <textarea data-initial-focus value={commitMessage} rows={4} disabled={!!pending} onChange={(event) => {
@@ -483,7 +490,7 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, pa
       </label>
     </Dialog>}
     {bulk && <BulkSelection root={root} index={index ?? bulk} onClose={() => setBulk(undefined)} onRefresh={onRefresh} />}
-    {stash && <GitStashes root={root} index={index} refresh={refresh} onClose={() => setStash(false)} onRefresh={onRefresh} />}
+    {stash && <GitStashes root={root} index={index} refresh={refresh} onClose={() => setStash(false)} onRefresh={onRefresh} shortcuts={compareShortcuts} />}
     {patchReview && <Dialog title={t(patchReview.kind === "discard" ? "Discard working change" : "Review text hunks")}
       helpTopic="gitView" wide onClose={() => setPatchReview(undefined)} footer={<>
         <Button onClick={() => setPatchReview(undefined)}>{t("Cancel")}</Button>
@@ -494,8 +501,7 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, pa
       {patchReview.kind === "discard" ? <>
         <p>{t(patchReview.plan.review.change.group === "untracked" ?
           "Remove this untracked file from the working tree." : "Restore the working file from the index. Staged changes are preserved.")}</p>
-        {patchReview.plan.diff.fallback ? <p>{t(fallbacks[patchReview.plan.diff.fallback])}</p> :
-          <pre className="git-patch" tabIndex={0} aria-label={t("Inline diff")}>{patchReview.plan.diff.patch}</pre>}
+        <WorkingFileComparison diff={patchReview.plan.diff} change={patchReview.plan.review.change} compareShortcuts={compareShortcuts} />
       </> : <>
         <label className="field">{t("Hunk")}
           <select value={hunk} onChange={(event) => setHunk(Number(event.target.value))}>

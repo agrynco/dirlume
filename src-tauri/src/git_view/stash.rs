@@ -1,6 +1,6 @@
 use super::{
-    bounded, history_edits, line, merge, oid, run, text_patch, working_changes, writes, GitError,
-    WorkingChange, PATCH_LIMIT, STATUS_LIMIT,
+    bounded, comparison, history_edits, line, merge, oid, run, success, working_changes, writes,
+    Change, GitError, WorkingChange, STATUS_LIMIT,
 };
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -16,16 +16,17 @@ pub struct StashEntry {
 }
 
 #[derive(Serialize)]
-pub struct StashDiff {
-    patch: Option<String>,
-    fallback: Option<&'static str>,
+pub struct StashChange {
+    base: Option<String>,
+    target: String,
+    change: Change,
 }
 
 #[derive(Serialize)]
 pub struct StashPreview {
-    combined: StashDiff,
-    staged: StashDiff,
-    working: StashDiff,
+    combined: Vec<StashChange>,
+    staged: Vec<StashChange>,
+    working: Vec<StashChange>,
 }
 
 #[derive(Deserialize)]
@@ -97,58 +98,37 @@ fn inspect(git: &Path, root: &Path, entry: &StashEntry) -> WriteResult<StashPrev
     merge::verify_worktree(git, root)?;
     selector(git, root, entry)?;
     let hash = oid(&entry.hash)?;
-    let base = format!("{hash}^1");
-    let index = format!("{hash}^2");
-    let combined = patch(
+    let revisions = line(success(run(
         git,
         root,
-        &[
-            "stash",
-            "show",
-            "--include-untracked",
-            "--patch",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-            hash,
-        ],
-    )?;
-    let diff = |from: &str, to: &str| {
-        patch(
-            git,
-            root,
-            &[
-                "diff",
-                "--patch",
-                "--no-color",
-                "--no-ext-diff",
-                "--no-textconv",
-                from,
-                to,
-                "--",
-            ],
-        )
+        &["rev-list", "--parents", "-1", hash, "--"],
+    )?)?)?;
+    let parents = revisions
+        .split_whitespace()
+        .skip(1)
+        .map(oid)
+        .collect::<super::Result<Vec<_>>>()?;
+    let [base, index, untracked @ ..] = parents.as_slice() else {
+        return Err(GitError::Unreadable.into());
     };
+    let files = |base: Option<&str>, target: &str| -> WriteResult<Vec<StashChange>> {
+        Ok(comparison::changed_paths(git, root, base, target)?
+            .into_iter()
+            .map(|change| StashChange {
+                base: base.map(str::to_owned),
+                target: target.to_owned(),
+                change,
+            })
+            .collect())
+    };
+    let mut combined = files(Some(base), hash)?;
+    if let Some(untracked) = untracked.first() {
+        combined.extend(files(None, untracked)?);
+    }
     Ok(StashPreview {
         combined,
-        staged: diff(&base, &index)?,
-        working: diff(&index, hash)?,
-    })
-}
-
-fn patch(git: &Path, root: &Path, args: &[&str]) -> WriteResult<StashDiff> {
-    let patch = bounded(git, root, args, PATCH_LIMIT)?
-        .ok_or("oversized")
-        .and_then(text_patch);
-    Ok(match patch {
-        Ok(patch) => StashDiff {
-            patch: Some(patch),
-            fallback: None,
-        },
-        Err(reason) => StashDiff {
-            patch: None,
-            fallback: Some(reason),
-        },
+        staged: files(Some(base), index)?,
+        working: files(Some(index), hash)?,
     })
 }
 
@@ -306,9 +286,24 @@ mod tests {
         assert_eq!(items.len(), 1);
         let first = &items[0];
         let preview = inspect(&git, root, first).unwrap();
-        assert!(preview.staged.patch.unwrap().contains("+staged"));
-        assert!(preview.working.patch.unwrap().contains("+working"));
-        assert!(preview.combined.patch.unwrap().contains("+untracked"));
+        let read_content = |change: &StashChange| {
+            let object = format!("{}:{}", change.target, change.change.path);
+            line(success(run(&git, root, &["show", &object]).unwrap()).unwrap()).unwrap()
+        };
+        assert_eq!(preview.staged[0].change.path, "note.txt");
+        assert_eq!(read_content(&preview.staged[0]), "staged");
+        assert_eq!(read_content(&preview.working[0]), "working");
+        assert_eq!(
+            preview.working[0].base.as_deref(),
+            Some(preview.staged[0].target.as_str())
+        );
+        let untracked = preview
+            .combined
+            .iter()
+            .find(|version| version.change.path == "new.txt")
+            .unwrap();
+        assert!(untracked.base.is_none());
+        assert_eq!(read_content(untracked), "untracked");
         assert_eq!(fs::read_to_string(root.join("note.txt")).unwrap(), "base\n");
         let result = change(
             &git,

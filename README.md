@@ -181,6 +181,8 @@ Open **Commit graph** to browse the selected branch, see its parent links and re
 
 Right-click a local file or press **Shift+F10** on its row to open the **Git** group. **Show history** and **Show blame** start at the checked-out revision. **Compare with revision…** compares the working file with a stored revision. **Show diff** shows staged and unstaged changes for that file. Git text comparisons use the built-in File Compare controls. Choose **Options → Layout** for **Unified** or **Side-by-side**. On Windows, choose **Windows context menu…** to open the system menu for the file.
 
+Select a changed path in **Compare revisions**, commit details, a cherry-pick or revert review, or a stash to compare its versions with the same controls.
+
 The branch pane can create a local branch at the selected commit, switch to an existing local branch, rename or safely delete a local branch, or create and switch to a local branch that tracks the selected remote branch. Review the repository and branch in the dialog before applying an action. Git checks whether local changes can be preserved on switch and whether deletion is safe.
 
 Select a source branch and choose **Merge branch** to review changes before a fast-forward or a merge commit. When Git reports conflicts, open **Merge in progress** to inspect Base, Ours, and Theirs. Choose a side or edit and stage the working result. Continue after resolving every path or confirm **Abort merge**. Reopening Git View reads the operation from Git.

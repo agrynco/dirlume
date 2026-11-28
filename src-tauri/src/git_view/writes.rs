@@ -659,7 +659,7 @@ fn review_discard(
         return Err(WriteError::Stale);
     }
     let stamps = worktree_stamps(git, root, std::slice::from_ref(&change))?;
-    let diff = super::working_diff(git, root, &change, false)?;
+    let diff = super::working_diff(git, root, &change, true)?;
     if worktree_stamps(git, root, std::slice::from_ref(&change))? != stamps {
         return Err(WriteError::Stale);
     }
