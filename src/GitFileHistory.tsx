@@ -9,25 +9,24 @@ import { RevisionInput } from "./GitRevisionComparison";
 import { t } from "./i18n";
 import { opposite, type Side } from "./panes";
 
-type FileTarget = { path: string; mode: "history" | "blame" };
 type HistoryPage = { commits: GitFileCommit[]; nextOffset: number | null };
 
-export function GitFileHistory({ repository, tip, side, initial, refresh, historyHeader, previewControls, commitActions, renderBlame }: {
+export function GitFileHistory({ repository, tip, side, initial, refresh, historyHeader, previewControls, commitActions, onBlame }: {
   repository: GitRepository;
   tip: string;
   side: Side;
-  initial?: FileTarget;
+  initial?: { path: string };
   refresh: number;
   historyHeader: ReactNode;
   previewControls: ReactNode;
   commitActions: (commit: GitCommit) => GitAction[];
-  renderBlame: (path: string) => ReactNode;
+  onBlame: (path: string, revision: string) => void;
 }) {
   const menu = useGitMenu();
   const [path, setPath] = useState(initial?.path ?? "");
-  const [opened, setOpened] = useState<FileTarget | undefined>(initial);
+  const [opened, setOpened] = useState(initial);
   const [history, setHistory] = useState<HistoryPage>();
-  const [request, setRequest] = useState<{ offset: number } | undefined>(initial?.mode === "history" ? { offset: 0 } : undefined);
+  const [request, setRequest] = useState<{ offset: number } | undefined>(initial ? { offset: 0 } : undefined);
   const [selected, setSelected] = useState<string>();
   const [comparing, setComparing] = useState(false);
   const [comparison, setComparison] = useState<{ hash: string; revision: string }>();
@@ -38,13 +37,13 @@ export function GitFileHistory({ repository, tip, side, initial, refresh, histor
   useEffect(() => {
     if (previousSource.current.refresh === refresh && previousSource.current.tip === tip) return;
     previousSource.current = { refresh, tip };
-    if (opened?.mode === "history") {
+    if (opened) {
       setFailedOffset(undefined);
       setRequest({ offset: 0 });
     }
   }, [opened, refresh, tip]);
   useEffect(() => {
-    if (opened?.mode !== "history" || !request) return;
+    if (!opened || !request) return;
     let active = true;
     void api.gitFileHistory(root, tip, opened.path, request.offset).then((page) => {
       if (!active) return;
@@ -56,14 +55,14 @@ export function GitFileHistory({ repository, tip, side, initial, refresh, histor
     }, () => { if (active) setFailedOffset(request.offset); }).finally(() => { if (active) setRequest(undefined); });
     return () => { active = false; };
   }, [root, tip, opened, request]);
-  function open(mode: FileTarget["mode"]) {
+  function open() {
     if (!path.trim()) return;
-    setOpened({ path, mode });
+    setOpened({ path });
     setHistory(undefined);
     setSelected(undefined);
     setComparison(undefined);
     setFailedOffset(undefined);
-    setRequest(mode === "history" ? { offset: 0 } : undefined);
+    setRequest({ offset: 0 });
   }
   function moveFocus(event: KeyboardEvent<HTMLDivElement>) {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !history?.commits.length) return;
@@ -85,11 +84,12 @@ export function GitFileHistory({ repository, tip, side, initial, refresh, histor
     revision: row.hash, path: row.change.path, absent: row.change.status === "D", label: t("Selected revision"),
   };
   const pathActions: GitAction[] = [
-    { label: "Show history", icon: FileClock, disabled: !path.trim(), submit: true, run: () => open("history") },
-    { label: "Show blame", icon: Search, disabled: !path.trim(), run: () => open("blame") },
+    { label: "Show history", icon: FileClock, disabled: !path.trim(), submit: true, run: open },
+    { label: "Show blame", icon: Search, disabled: !path.trim(), run: () => onBlame(path, tip) },
   ];
   const revisionActions: GitAction[] = row ? [
     { label: "Compare with revision…", icon: GitCompareArrows, run: () => setComparing(true) },
+    { label: "Show blame", icon: Search, run: () => onBlame(row.change.path, row.hash) },
     ...(selectedComparison ? [{ label: "Show parent comparison", icon: ArrowLeft, run: () => setComparison(undefined) }] : []),
   ] : [];
   return <>
@@ -101,15 +101,13 @@ export function GitFileHistory({ repository, tip, side, initial, refresh, histor
       </header>
       {!!revisionActions.length && <div className="git-branch-actions"><GitActionButtons actions={revisionActions} /></div>}
       {row && before && after ? <GitFileVersions key={JSON.stringify([row.hash, before.revision, refresh])} root={root}
-        left={before} right={after} showRevision /> :
-        opened?.mode === "blame" ? renderBlame(opened.path) :
-          <p className="pane-empty">{t("Select a file revision to preview its changes.")}</p>}
+        left={before} right={after} showRevision /> : <p className="pane-empty">{t("Select a file revision to preview its changes.")}</p>}
     </section>
     <section className={"pane git-pane git-pane-" + opposite(side)} aria-label={t("Commit history")}
       tabIndex={-1} data-help-topic="gitView" data-pane-side={opposite(side)} {...menu(pathActions)}>
       {historyHeader}
       <div className="git-file-history">
-        <form onSubmit={(event) => { event.preventDefault(); open("history"); }}>
+        <form onSubmit={(event) => { event.preventDefault(); open(); }}>
           <label className="field">{t("Path relative to the repository")}
             <input value={path} onChange={(event) => setPath(event.target.value)} required spellCheck={false} autoComplete="off" />
           </label>
@@ -127,6 +125,7 @@ export function GitFileHistory({ repository, tip, side, initial, refresh, histor
           tabIndex={selected === commit.hash ? 0 : -1} onFocus={() => setSelected(commit.hash)} onClick={() => setSelected(commit.hash)}
           {...menu([
             { label: "Show change", icon: FileDiff, run: () => setSelected(commit.hash) },
+            { label: "Show blame", icon: Search, run: () => onBlame(commit.change.path, commit.hash) },
             ...commitActions(commit),
           ], commit.shortHash)}>
           <strong>{commit.subject || t("No subject")}</strong>
@@ -134,7 +133,7 @@ export function GitFileHistory({ repository, tip, side, initial, refresh, histor
         </Button>)}
         {request && <p className="git-file-feedback" role="status">{t("Loading commits…")}</p>}
       </div>
-      {!request && opened?.mode === "history" && (failedOffset !== undefined || history?.nextOffset != null) &&
+      {!request && opened && (failedOffset !== undefined || history?.nextOffset != null) &&
         <div className="git-branch-actions">
           <Button onClick={() => { setFailedOffset(undefined); setRequest({ offset: failedOffset ?? history?.nextOffset ?? 0 }); }}>
             {t(failedOffset === undefined ? "Load more" : "Retry")}

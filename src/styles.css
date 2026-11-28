@@ -1165,6 +1165,28 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   flex: 1; min-height: 0; overflow: auto; color: var(--compare-ink); background: var(--compare-bg);
   font: var(--compare-size)/1.5 var(--compare-font);
 }
+.git-blame-viewer { flex: 1 1 min(66vh, 42rem); height: auto; border: 0; min-inline-size: 0; }
+.document-heading.git-blame-heading { grid-template-columns: minmax(0, 1fr) max-content; align-items: center; }
+.git-blame-heading strong { grid-column: 1; overflow-wrap: anywhere; }
+.git-blame-heading > span { grid-column: 1; color: var(--muted); overflow-wrap: anywhere; }
+.git-blame-heading > button { grid-column: 2; grid-row: 1 / span 2; }
+.git-blame-lines, .git-blame-detail { flex: 1; min-height: 0; overflow: auto; }
+.git-blame-lines { background: var(--document-bg); color: var(--document-ink); }
+.git-blame-line { display: grid; grid-template-columns: clamp(7rem, 25%, 13rem) 4ch minmax(0, 1fr); border-block-end: 1px solid var(--line); }
+.git-blame-attribution { min-width: 0; display: grid; align-content: start; justify-content: stretch; gap: 2px; padding: 3px 7px;
+  text-align: start; line-height: 1.2; border-radius: 0;
+  color: var(--ink); background: var(--raised); border-inline-end: 1px solid var(--line); }
+.git-blame-attribution strong, .git-blame-attribution small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-blame-attribution small { color: var(--muted); }
+.git-blame-attribution:hover { background: var(--panel-selection); color: var(--panel-selected-ink); }
+.git-blame-attribution:focus-visible { outline-offset: -2px; }
+.git-blame-number, .git-blame-text { font: var(--document-size)/1.65 var(--document-font); padding: 4px 6px; }
+.git-blame-number { text-align: end; color: var(--viewer-line-number, var(--document-ink)); }
+.git-blame-text { white-space: pre; tab-size: 4; }
+.git-blame-lines[data-wrap="true"] .git-blame-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.git-blame-detail { padding: 12px; }
+.git-blame-origin { color: var(--muted); margin-block: 8px; overflow-wrap: anywhere; }
+.git-blame-detail .git-details li[data-highlight] { background: var(--panel-selection); color: var(--panel-selected-ink); }
 .environment-pane { overflow: hidden; }
 .environment-pane .pane-title { flex: 1; }
 .environment-pane .pane-title svg { width: 15px; height: 15px; flex: none; }

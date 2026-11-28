@@ -412,30 +412,6 @@ fn history_of(
     })
 }
 
-fn blame(git: &Path, root: &Path, tip: &str, path: &str) -> Result<String> {
-    let tip = oid(tip)?;
-    relative_file(path)?;
-    let lines = bounded(
-        git,
-        root,
-        &[
-            "-c",
-            "blame.showEmail=false",
-            "-c",
-            "blame.coloring=none",
-            "blame",
-            "--abbrev=12",
-            "--date=short",
-            tip,
-            "--",
-            path,
-        ],
-        PATCH_LIMIT,
-    )?
-    .ok_or(GitError::Unreadable)?;
-    Ok(String::from_utf8_lossy(&lines).into_owned())
-}
-
 fn details(git: &Path, path: &Path, hash: &str) -> Result<Details> {
     let hash = oid(hash)?;
     let header = success(run(
@@ -743,11 +719,6 @@ pub async fn git_repository(path: String) -> Result<Repository> {
 #[tauri::command]
 pub async fn git_history(root: String, tip: String, offset: u32) -> Result<History> {
     query(move || history(&executable()?, directory(&root)?, &tip, offset)).await
-}
-
-#[tauri::command]
-pub async fn git_file_blame(root: String, tip: String, path: String) -> Result<String> {
-    query(move || blame(&executable()?, directory(&root)?, &tip, &path)).await
 }
 
 #[tauri::command]

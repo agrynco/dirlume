@@ -129,6 +129,163 @@ pub struct FileRevision {
     content: FileContent,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BlameLine {
+    number: u32,
+    original: u32,
+    hash: String,
+    author: String,
+    time: i64,
+    path: String,
+    text: String,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+enum BlameContent {
+    Available { lines: Vec<BlameLine> },
+    Empty,
+    Missing,
+    Binary,
+    Oversized,
+}
+
+#[derive(Serialize)]
+pub struct FileBlame {
+    revision: String,
+    path: String,
+    content: BlameContent,
+}
+
+fn blame_path(value: &str) -> Result<String> {
+    if let Some(value) = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    {
+        let mut bytes = value.bytes();
+        let mut path = Vec::with_capacity(value.len());
+        while let Some(byte) = bytes.next() {
+            let output = if byte == b'\\' {
+                match bytes.next() {
+                    Some(b'a') => 7,
+                    Some(b'b') => 8,
+                    Some(b't') => b'\t',
+                    Some(b'n') => b'\n',
+                    Some(b'v') => 11,
+                    Some(b'f') => 12,
+                    Some(b'r') => b'\r',
+                    Some(escaped @ (b'\\' | b'"')) => escaped,
+                    Some(first @ b'0'..=b'3') => {
+                        let octal = |value: Option<u8>| {
+                            value
+                                .filter(|digit| matches!(digit, b'0'..=b'7'))
+                                .map(|digit| digit - b'0')
+                                .ok_or(GitError::Unreadable)
+                        };
+                        (first - b'0') * 64 + octal(bytes.next())? * 8 + octal(bytes.next())?
+                    }
+                    _ => return Err(GitError::Unreadable),
+                }
+            } else {
+                byte
+            };
+            path.push(output);
+        }
+        return String::from_utf8(path).map_err(|_| GitError::Unreadable);
+    }
+    Ok(value.to_owned())
+}
+
+fn blame_lines(bytes: &[u8]) -> Result<Vec<BlameLine>> {
+    let data = String::from_utf8_lossy(bytes);
+    let mut lines = data.split_terminator('\n');
+    let mut result = Vec::new();
+    while let Some(header) = lines.next() {
+        let mut fields = header.split_whitespace();
+        let hash = oid(fields.next().ok_or(GitError::Unreadable)?)?.to_owned();
+        let mut number = || {
+            fields
+                .next()
+                .and_then(|field| field.parse::<u32>().ok())
+                .ok_or(GitError::Unreadable)
+        };
+        let original = number()?;
+        let number = number()?;
+        let (mut author, mut time, mut path, mut text) = (None, None, None, None);
+        for line in lines.by_ref() {
+            if let Some(value) = line.strip_prefix('\t') {
+                text = Some(value.strip_suffix('\r').unwrap_or(value).to_owned());
+                break;
+            }
+            if let Some(value) = line.strip_prefix("author ") {
+                author = Some(value.to_owned());
+            } else if let Some(value) = line.strip_prefix("author-time ") {
+                time = value.parse::<i64>().ok();
+            } else if let Some(value) = line.strip_prefix("filename ") {
+                path = Some(blame_path(value)?);
+            }
+        }
+        let (Some(author), Some(time), Some(path), Some(text)) = (author, time, path, text) else {
+            return Err(GitError::Unreadable);
+        };
+        if original == 0 || number as usize != result.len() + 1 {
+            return Err(GitError::Unreadable);
+        }
+        result.push(BlameLine {
+            hash,
+            original,
+            number,
+            author,
+            time,
+            path,
+            text,
+        });
+    }
+    Ok(result)
+}
+
+fn file_blame(git: &Path, root: &Path, tip: &str, path: &str) -> Result<FileBlame> {
+    let FileRevision {
+        revision,
+        path,
+        content,
+    } = file_revision(git, root, tip, path)?;
+    let content = match content {
+        FileContent::Available { text } if text.is_empty() => BlameContent::Empty,
+        FileContent::Available { .. } => match bounded(
+            git,
+            root,
+            &[
+                "-c",
+                "core.quotePath=false",
+                "--literal-pathspecs",
+                "blame",
+                "--line-porcelain",
+                "--no-progress",
+                "--encoding=UTF-8",
+                &revision,
+                "--",
+                &path,
+            ],
+            STATUS_LIMIT,
+        )? {
+            Some(bytes) => BlameContent::Available {
+                lines: blame_lines(&bytes)?,
+            },
+            None => BlameContent::Oversized,
+        },
+        FileContent::Missing => BlameContent::Missing,
+        FileContent::Binary => BlameContent::Binary,
+        FileContent::Oversized => BlameContent::Oversized,
+    };
+    Ok(FileBlame {
+        revision,
+        path,
+        content,
+    })
+}
+
 fn file_revision(git: &Path, root: &Path, revision: &str, path: &str) -> Result<FileRevision> {
     relative_file(path)?;
     let revision = resolve_commit(git, root, revision)?;
@@ -191,6 +348,11 @@ pub async fn git_file_revision(
     query(move || file_revision(&executable()?, directory(&root)?, &revision, &path)).await
 }
 
+#[tauri::command]
+pub async fn git_file_blame(root: String, tip: String, path: String) -> Result<FileBlame> {
+    query(move || file_blame(&executable()?, directory(&root)?, &tip, &path)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,6 +373,74 @@ mod tests {
             exe,
             root,
             &["config", "user.email", "fixture@example.invalid"],
+        );
+        git(exe, root, &["config", "commit.gpgsign", "false"]);
+    }
+
+    #[test]
+    fn blames_the_stored_version_across_a_rename_and_preserves_line_origins() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let exe = executable().unwrap();
+        fixture(&exe, root);
+        let cli = |args: &[&str]| git(&exe, root, args);
+        let old = "old źródło.txt";
+        let new = "new source.txt";
+        std::fs::write(
+            root.join(old),
+            "first stable line\noriginal text\nlast stable line\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("empty.txt"), "").unwrap();
+        std::fs::write(root.join("binary.dat"), b"a\0b").unwrap();
+        cli(&["add", "."]);
+        cli(&["commit", "-m", "First lines"]);
+        let original = cli(&["rev-parse", "HEAD"]);
+        cli(&["mv", old, new]);
+        cli(&["commit", "-m", "Rename source"]);
+        cli(&["config", "user.name", "Second author"]);
+        std::fs::write(
+            root.join(new),
+            "first stable line\nnew text\nlast stable line\n",
+        )
+        .unwrap();
+        cli(&["commit", "-am", "Change line two"]);
+        let tip = cli(&["rev-parse", "HEAD"]);
+        std::fs::write(root.join(new), "local file contents\n").unwrap();
+        let blamed = file_blame(&exe, root, &tip, new).unwrap();
+        assert_eq!(blamed.revision, tip);
+        let BlameContent::Available { lines } = blamed.content else {
+            panic!("expected committed lines");
+        };
+        assert_eq!(lines.len(), 3);
+        assert_eq!(
+            (&*lines[0].author, &*lines[0].hash, &*lines[0].path),
+            ("Fixture", original.as_str(), old)
+        );
+        assert_eq!(
+            (&*lines[1].author, &*lines[1].hash, &*lines[1].path),
+            ("Second author", tip.as_str(), new)
+        );
+        assert_eq!(
+            (lines[1].original, lines[1].number, &*lines[1].text),
+            (2, 2, "new text")
+        );
+        assert!(lines[0].time > 0);
+        assert!(matches!(
+            file_blame(&exe, root, &tip, "empty.txt").unwrap().content,
+            BlameContent::Empty
+        ));
+        assert!(matches!(
+            file_blame(&exe, root, &tip, "binary.dat").unwrap().content,
+            BlameContent::Binary
+        ));
+        assert!(matches!(
+            file_blame(&exe, root, &tip, old).unwrap().content,
+            BlameContent::Missing
+        ));
+        assert_eq!(
+            blame_path(r#""path\twith\040quotes\".txt""#).unwrap(),
+            "path\twith quotes\".txt"
         );
     }
 

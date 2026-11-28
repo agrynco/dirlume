@@ -455,6 +455,20 @@ export interface GitFileCommit extends GitCommit {
 }
 
 export type GitFileContent = { state: "available"; text: string } | { state: "missing" | "binary" | "oversized" };
+export interface GitBlameLine {
+  number: number;
+  original: number;
+  hash: string;
+  author: string;
+  time: number;
+  path: string;
+  text: string;
+}
+export interface GitFileBlame {
+  revision: string;
+  path: string;
+  content: { state: "available"; lines: GitBlameLine[] } | { state: "empty" | "missing" | "binary" | "oversized" };
+}
 
 export interface GitFileRevision {
   revision: string;
@@ -833,7 +847,7 @@ export const api = {
   gitFileRevision: (root: string, revision: string, path: string) =>
     invoke<GitFileRevision>("git_file_revision", { root, revision, path }),
   gitFileBlame: (root: string, tip: string, path: string) =>
-    invoke<string>("git_file_blame", { root, tip, path }),
+    invoke<GitFileBlame>("git_file_blame", { root, tip, path }),
   gitDetails: (root: string, hash: string) => invoke<GitDetails>("git_details", { root, hash }),
   gitUpdateBranch: (root: string, request: GitBranchRequest) =>
     invoke<GitRepository>("git_update_branch", { root, request }),
