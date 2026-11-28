@@ -48,6 +48,7 @@ export async function testOsTimestamps(page, root) {
 
   const window = await openOptionsWindow(page);
   const general = window.getByRole("dialog", { name: "Options", exact: true });
+  await general.getByRole("searchbox", { name: "Search settings", exact: true }).fill("");
   await general.getByRole("button", { name: "General", exact: true }).click();
   await general.getByLabel("Language", { exact: true }).selectOption("uk");
   await closeToolWindow(window, () => general.getByRole("button", { name: "Done", exact: true }).click());
