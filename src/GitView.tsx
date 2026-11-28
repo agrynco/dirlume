@@ -57,7 +57,7 @@ function ChangeDetails({ root, commit }: { root: string; commit: GitCommit }) {
   </section>;
 }
 
-function History({ root, tip }: { root: string; tip?: string }) {
+function History({ root, tip, file }: { root: string; tip?: string; file?: string }) {
   const [result, setResult] = useState<GitHistory>({ commits: [], nextOffset: tip ? 0 : null });
   const [request, setRequest] = useState<{ offset: number } | null>(tip ? { offset: 0 } : null);
   const [open, setOpen] = useState<string | null>(null);
@@ -65,7 +65,8 @@ function History({ root, tip }: { root: string; tip?: string }) {
   useEffect(() => {
     if (!tip || !request) return;
     let canceled = false;
-    void api.gitHistory(root, tip, request.offset).then((page) => {
+    const query = file ? api.gitFileHistory(root, tip, file, request.offset) : api.gitHistory(root, tip, request.offset);
+    void query.then((page) => {
       if (!canceled) setResult((current) => ({
         commits: request.offset === 0 ? page.commits : [...current.commits, ...page.commits], nextOffset: page.nextOffset,
       }));
@@ -75,7 +76,7 @@ function History({ root, tip }: { root: string; tip?: string }) {
       if (!canceled) setRequest(null);
     });
     return () => { canceled = true; };
-  }, [root, tip, request]);
+  }, [root, tip, file, request]);
   const formatDate = useTimestamps(result.commits.map(({ date }) => Math.floor(Date.parse(date) / 1000)));
   return <div className="git-history git-scroll">
     {result.commits.map((commit) => <div className="git-commit" key={commit.hash}>
@@ -98,6 +99,73 @@ function History({ root, tip }: { root: string; tip?: string }) {
   </div>;
 }
 
+function CommitGraph({ root, tip }: { root: string; tip: string }) {
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  const [graph, setGraph] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let canceled = false;
+    void api.gitCommitGraph(root, tip, query).then((value) => {
+      if (!canceled) setGraph(value);
+    }, (error: unknown) => { if (!canceled) setError(gitError(error)); });
+    return () => { canceled = true; };
+  }, [root, tip, query]);
+  return <div className="git-scroll git-revision-comparison">
+    <form onSubmit={(event) => {
+      event.preventDefault();
+      if (search.trim() === query) return;
+      setGraph(null);
+      setError("");
+      setQuery(search.trim());
+    }}>
+      <label className="field">{t("Search commit messages")}
+        <input type="search" maxLength={200} value={search} onChange={(event) => setSearch(event.target.value)} />
+      </label>
+      <Button type="submit">{t("Search")}</Button>
+    </form>
+    {error ? <p role="alert">{error}</p> : graph === null ? <p role="status">{t("Loading commits…")}</p> :
+      graph ? <><p>{t("Showing up to 250 commits.")}</p><pre className="git-patch" tabIndex={0}
+        aria-label={t("Commit graph")}>{graph}</pre></> : <p>{t("No matching commits.")}</p>}
+  </div>;
+}
+
+function Blame({ root, tip, path }: { root: string; tip: string; path: string }) {
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    let canceled = false;
+    void api.gitFileBlame(root, tip, path).then((result) => { if (!canceled) setResult(result); },
+      () => { if (!canceled) setError(true); });
+    return () => { canceled = true; };
+  }, [root, tip, path]);
+  if (error) return <p role="alert">{t("Could not read blame for this path at the selected revision.")}</p>;
+  if (result === null) return <p role="status">{t("Reading change…")}</p>;
+  return result
+    ? <pre className="git-patch" tabIndex={0} aria-label={t("Blame")}>{result}</pre>
+    : <p>{t("This file has no lines.")}</p>;
+}
+
+function FileRevision({ root, tip }: { root: string; tip: string }) {
+  const [path, setPath] = useState("");
+  const [opened, setOpened] = useState<{ path: string; mode: "history" | "blame" }>();
+  return <div className="git-scroll git-revision-comparison">
+    <form onSubmit={(event) => {
+      event.preventDefault();
+      if (path) setOpened({ path, mode: "history" });
+    }}>
+      <label className="field">{t("Path relative to the repository")}
+        <input value={path} onChange={(event) => setPath(event.target.value)} required spellCheck={false} autoComplete="off" />
+      </label>
+      <Button type="submit" disabled={!path}>{t("Show history")}</Button>
+      <Button type="button" disabled={!path} onClick={() => setOpened({ path, mode: "blame" })}>{t("Show blame")}</Button>
+    </form>
+    {opened && (opened.mode === "history"
+      ? <History key={opened.path} root={root} tip={tip} file={opened.path} />
+      : <Blame key={opened.path} root={root} tip={tip} path={opened.path} />)}
+  </div>;
+}
+
 export default function GitView({ path, side, refresh, onRefresh, onClose, onOpen, canEdit }: {
   path: string;
   side: Side;
@@ -112,7 +180,7 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState("");
   const [changes, setChanges] = useState(false);
-  const [comparing, setComparing] = useState(false);
+  const [historyMode, setHistoryMode] = useState<"history" | "graph" | "file" | "compare">("history");
   const [selectedChange, setSelectedChange] = useState("");
   const [draft, setDraft] = useState<{ root: string; message: string }>();
   const [branchReview, setBranchReview] = useState<{ request: GitBranchRequest; root: string; branchName: string }>();
@@ -254,15 +322,25 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
         </div> : <p className="pane-empty" role="status">{t("Reading Git repository…")}</p>}
     </section>
     <section className={"pane git-pane git-pane-" + opposite(side)} aria-label={t("Commit history")} data-help-topic="gitView" data-pane-side={opposite(side)}>
-      <header className="pane-heading">
+      <header className="pane-heading git-history-heading">
         <span className="pane-title"><GitCommitHorizontal aria-hidden="true" />{t("Commit history")}</span>
         {repository && <span className="git-ref">{branch?.name ?? allBranches.find(({ reference }) => reference === checkedOut)?.name}</span>}
-        <Button disabled={!repository || !!error} aria-pressed={comparing}
-          onClick={() => setComparing(!comparing)}>{t("Compare revisions")}</Button>
+        <div className="git-history-actions">
+          <Button disabled={!tip || !!error} aria-pressed={historyMode === "graph"}
+            onClick={() => setHistoryMode(historyMode === "graph" ? "history" : "graph")}>{t("Commit graph")}</Button>
+          <Button disabled={!tip || !!error} aria-pressed={historyMode === "file"}
+            onClick={() => setHistoryMode(historyMode === "file" ? "history" : "file")}>{t("File history")}</Button>
+          <Button disabled={!repository || !!error} aria-pressed={historyMode === "compare"}
+            onClick={() => setHistoryMode(historyMode === "compare" ? "history" : "compare")}>{t("Compare revisions")}</Button>
+        </div>
       </header>
-      {repository && !changes && (comparing
+      {repository && !changes && (historyMode === "compare"
         ? <GitRevisionComparison key={repository.root + ":" + selected + ":" + refresh} repository={repository} target={tip} />
-        : <History key={selected + ":" + (tip ?? "") + ":" + refresh} root={repository.root} tip={tip} />)}
+        : historyMode === "graph" && tip
+          ? <CommitGraph key={tip + ":" + refresh} root={repository.root} tip={tip} />
+          : historyMode === "file" && tip
+            ? <FileRevision key={tip + ":" + refresh} root={repository.root} tip={tip} />
+          : <History key={selected + ":" + (tip ?? "") + ":" + refresh} root={repository.root} tip={tip} />)}
     </section>
     {branchReview && <Dialog title={t(branchActions[branchReview.request.action])} helpTopic="gitView"
       onClose={branchWorking ? undefined : () => setBranchReview(undefined)} footer={<>

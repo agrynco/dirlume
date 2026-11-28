@@ -672,6 +672,12 @@ export const api = {
   cancelSpaceScan: (id: string) => invoke<void>("cancel_space_scan", { id }),
   gitRepository: (path: string) => invoke<GitRepository>("git_repository", { path }),
   gitHistory: (root: string, tip: string, offset: number) => invoke<GitHistory>("git_history", { root, tip, offset }),
+  gitCommitGraph: (root: string, tip: string, search: string) =>
+    invoke<string>("git_commit_graph", { root, tip, search }),
+  gitFileHistory: (root: string, tip: string, path: string, offset: number) =>
+    invoke<GitHistory>("git_file_history", { root, tip, path, offset }),
+  gitFileBlame: (root: string, tip: string, path: string) =>
+    invoke<string>("git_file_blame", { root, tip, path }),
   gitDetails: (root: string, hash: string) => invoke<GitDetails>("git_details", { root, hash }),
   gitUpdateBranch: (root: string, request: GitBranchRequest) =>
     invoke<GitRepository>("git_update_branch", { root, request }),

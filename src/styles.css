@@ -1004,6 +1004,8 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-filter { min-width: 0; margin: 6px 7px; }
 .git-scroll { flex: 1; min-height: 0; overflow: auto; padding-block: 2px; }
 .git-branch-actions { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px 8px; }
+.git-history-heading { flex-wrap: wrap; }
+.git-history-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .git-revision-comparison { display: grid; align-content: start; gap: 10px; padding: 8px; }
 .git-revision-comparison form { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
 .git-revision-comparison form > div { flex: 1 1 10rem; min-width: 0; }

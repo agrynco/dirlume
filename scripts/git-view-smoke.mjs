@@ -58,6 +58,17 @@ try {
             assertRoot(args.root);
             if (args.base !== hash("a") || args.target !== hash("c") || args.path !== "compare.txt") throw "invalid comparison";
             return { patch: "-old\n+new\n", fallback: null };
+          case "git_commit_graph":
+            assertRoot(args.root);
+            return args.search ? "* ccccccc Topic match\n" : "* ccccccc Topic match\n* aaaaaaa Common\n";
+          case "git_file_history":
+            assertRoot(args.root);
+            if (args.path !== "note.txt") throw "invalid path";
+            return { commits: [commit("c", "Edited tracked note")], nextOffset: null };
+          case "git_file_blame":
+            assertRoot(args.root);
+            if (args.path !== "note.txt" || args.tip !== hash("c")) throw "invalid file revision";
+            return "cccccccccccc (Fixture Author 2026-11-21 1) note\n";
           case "git_history":
             if (args.tip === hash("b")) return new Promise((resolve) => {
               window.finishOldHistory = () => resolve({ commits: [commit("b", "Stale local topic")], nextOffset: null });
@@ -174,6 +185,20 @@ try {
   assert.deepEqual(await page.evaluate(() => window.gitCompared), { base: "a".repeat(40), target: "refs/tags/v1" });
   assert.equal(await page.evaluate(() => window.gitLastAction), undefined);
   await button(history, "Compare revisions").click();
+  await button(history, "Commit graph").click();
+  const graph = history.getByLabel("Commit graph", { exact: true });
+  await graph.filter({ hasText: "Common" }).waitFor();
+  await history.getByRole("searchbox", { name: "Search commit messages", exact: true }).fill("Topic");
+  await button(history, "Search").click();
+  await graph.filter({ hasText: "Topic match" }).waitFor();
+  assert.doesNotMatch(await graph.textContent(), /Common/);
+  await button(history, "File history").click();
+  await history.getByRole("textbox", { name: "Path relative to the repository", exact: true }).fill("note.txt");
+  await button(history, "Show history").click();
+  await history.getByRole("button", { name: /Edited tracked note/ }).waitFor();
+  await button(history, "Show blame").click();
+  await history.getByLabel("Blame", { exact: true }).filter({ hasText: "Fixture Author" }).waitFor();
+  await button(history, "File history").click();
   await button(branches, "Create tracking branch and switch").click();
   const tracking = page.getByRole("dialog", { name: "Create tracking branch and switch", exact: true });
   assert.equal(await tracking.getByRole("textbox", { name: "Branch name", exact: true }).inputValue(), "topic");

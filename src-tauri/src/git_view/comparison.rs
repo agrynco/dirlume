@@ -244,5 +244,14 @@ mod tests {
             .contains("+topic"));
         assert_eq!(run(&["status", "--porcelain"]), before);
         assert_eq!(run(&["rev-parse", "HEAD"]), base);
+        let graph = super::super::commit_graph(&git, root, &target, "topic").unwrap();
+        assert!(graph.contains("* "));
+        assert!(graph.contains("Topic"));
+        assert!(!graph.contains("Common"));
+        let history = super::super::history_of(&git, root, &target, 0, Some("topic.txt")).unwrap();
+        assert_eq!(history.commits[0].subject, "Topic");
+        let blamed = super::super::blame(&git, root, &target, "topic.txt").unwrap();
+        assert!(blamed.contains("Fixture Author"));
+        assert!(blamed.ends_with("topic\n"));
     }
 }

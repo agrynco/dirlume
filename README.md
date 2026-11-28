@@ -175,6 +175,8 @@ With Git installed, choose **Git View** beside **Quick View** from a local repos
 
 Choose **Compare revisions** in the history pane to compare two branches, tags, or full commit IDs. Each side lists its unique commits. Select a changed path for an inline diff from base to target. Comparing leaves the checkout, index, and working files intact.
 
+Open **Commit graph** for the selected branch and search commit messages. Open **File history** and enter a repository-relative path to see the file's commits or line authorship at that revision.
+
 The branch pane can create a local branch at the selected commit, switch to an existing local branch, rename or safely delete a local branch, or create and switch to a local branch that tracks the selected remote branch. Review the repository and branch in the dialog before applying an action. Git checks whether local changes can be preserved on switch and whether deletion is safe.
 
 In **Changes**, use **Stage** or **Unstage** in the preview pane to update the selected path in the index. Replacing a staged version with the full working file requires confirmation. **Commit…** opens a review of every staged path, including paths hidden by the filter. Choose a path to inspect the staged diff, enter a message, and confirm to create a local commit on the checked-out branch. If the branch or index changed since the review, refresh and confirm again. Git executes configured hooks and signing without an interactive terminal. A hook that changes the reviewed commit contents cancels the commit. Use a terminal for interactive Git operations.
