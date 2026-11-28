@@ -133,6 +133,8 @@ export function FileColumns({ container, groups, columns, tracks, samples, statu
     const cells = [...probes.querySelectorAll<HTMLElement>("[data-column]")];
     const text = document.createElement("canvas").getContext("2d");
     const measure = () => {
+      // A document temporarily hides the panes. Keep their last measurements until they are visible again.
+      if (pane.getBoundingClientRect().width === 0) return;
       for (const cell of cells) {
         let width = cell.getBoundingClientRect().width;
         const sampleStyle = cell.querySelector<HTMLElement>("[data-text-field]");
