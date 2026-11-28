@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { Plus } from "lucide-react";
 import { api, describeError, windowsClient } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
@@ -28,6 +29,9 @@ export function UserMenuDialog({ context, onRun, onClose }: {
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const list = useRef<HTMLDivElement>(null);
+  const sourceField = useRef<HTMLSelectElement>(null);
+  const hiddenField = useRef<HTMLInputElement>(null);
+  const newCommandButton = useRef<HTMLButtonElement>(null);
   const firstField = useRef<HTMLInputElement>(null);
   const stepsField = useRef<HTMLTextAreaElement>(null);
 
@@ -43,11 +47,6 @@ export function UserMenuDialog({ context, onRun, onClose }: {
     return () => { active = false; };
   }, [context.folder]);
 
-  useLayoutEffect(() => {
-    if (editor || parameters) firstField.current?.focus();
-    else if (!review) list.current?.focus({ preventScroll: true });
-  }, [Boolean(editor), Boolean(parameters), review, path, busy]);
-
   const source = sources.find((candidate) => candidate.path === path);
   const entries = draft ?? source?.entries ?? [];
   const items = menuLevel(entries, level);
@@ -62,7 +61,14 @@ export function UserMenuDialog({ context, onRun, onClose }: {
   const dirty = draft !== undefined;
   const sourceVersion = source ? { folder: context.folder, path: source.path, revision: source.revision } : undefined;
   const editable = !!source?.writable && !source.error;
+  const hasEntries = selectable.length > 0;
+  const hasHiddenEntries = items.some((entry) => entry.kind !== "separator" && !menuVisible(entry, context, windowsClient));
   const promptPreview = parameters?.entry.steps.map((step) => menuPreview(step, menuValues(context, parameters.inputs), true));
+
+  useLayoutEffect(() => {
+    if (editor || parameters) firstField.current?.focus();
+    else if (!review && !busy) (list.current ?? newCommandButton.current ?? hiddenField.current ?? sourceField.current)?.focus({ preventScroll: true });
+  }, [Boolean(editor), Boolean(parameters), review, path, busy, managing, level.length, hasEntries]);
 
   function choose(path: string) {
     setPath(path);
@@ -212,7 +218,7 @@ export function UserMenuDialog({ context, onRun, onClose }: {
         <Button className="primary" disabled={!dirty || busy} onClick={() => void save()}>{t("Save menu")}</Button></> :
       <><Button disabled={busy || !source} onClick={() => { setManaging(true); setShowHidden(true); }}>{t("Manage menus")}</Button>
         <Button onClick={onClose}>{t("Close")}</Button></>}>
-    <div className="user-menu-body">
+    <div className="dialog-body user-menu-body">
       {error && <p role="alert">{errorText(error)}</p>}
       {editor ? <>
         <label>{t("Label")}<input ref={firstField} value={editor.entry.label} onChange={(event) => setEditor({ ...editor, entry: { ...editor.entry, label: event.target.value } })} /></label>
@@ -231,14 +237,14 @@ export function UserMenuDialog({ context, onRun, onClose }: {
         <p>{t("Review the commands in this file. Approval applies to these contents for this session.")}</p>
         <pre>{JSON.stringify(source?.entries ?? [], null, 2)}</pre>
       </> : <>
-        <label>{t("Menu source")}<select value={path} onChange={(event) => choose(event.target.value)} disabled={busy || dirty}>{options}</select></label>
-        <p className="user-menu-path">{source?.path ?? context.folder}</p>
+        <label>{t("Menu source")}<select ref={sourceField} value={path} onChange={(event) => choose(event.target.value)} disabled={busy || dirty || !sources.length}>{options}</select></label>
+        {source && (managing || source.error) && <p className="user-menu-path">{source.path}</p>}
         {source?.error && <p role="alert">{errorText(source.error)}</p>}
         {source && !source.writable && <p>{t("Read only")}</p>}
         {source?.revision && !source.approved && !source.error && <Button onClick={() => setReview(true)}>{t("Review folder menu")}</Button>}
         {level.length > 0 && <Button onClick={goBack}>{t("Back")}</Button>}
-        {!managing && <label className="user-menu-check"><input type="checkbox" checked={showHidden} onChange={(event) => setShowHidden(event.target.checked)} />{t("Show hidden entries")}</label>}
-        <div ref={list} tabIndex={0} className="user-menu-list" role="listbox" aria-label={t("Menu entries")}
+        {!managing && hasHiddenEntries && <label className="user-menu-check"><input ref={hiddenField} type="checkbox" checked={showHidden} onChange={(event) => setShowHidden(event.target.checked)} />{t("Show hidden entries")}</label>}
+        {hasEntries ? <div ref={list} tabIndex={0} className="user-menu-list" role="listbox" aria-label={t("Menu entries")}
           aria-activedescendant={currentIndex === undefined ? undefined : `user-menu-entry-${currentIndex}`} onKeyDown={keyDown}>
           {rows.map((row) => row.entry.kind === "separator" && !managing ? <hr key={row.index} /> :
             <div key={row.index} id={`user-menu-entry-${row.index}`} role="option" aria-selected={currentIndex === row.index}
@@ -246,21 +252,26 @@ export function UserMenuDialog({ context, onRun, onClose }: {
               <span>{row.entry.kind === "separator" ? t("Separator") : menuPreview(row.entry.label, values).text}</span>
               {row.entry.kind !== "separator" && <span>{row.entry.hotkey}{row.entry.kind === "submenu" ? " ›" : ""}</span>}
             </div>)}
-          {rows.length === 0 && <p>{t(busy ? "Loading…" : "No menu entries")}</p>}
-        </div>
-        {editable && <div className="user-menu-tools">
-          {(managing || !items.length) && <Button onClick={() => add(newCommand())}>{t("New command")}</Button>}
-          {managing && <>
+        </div> : busy ? <p role="status">{t("Loading…")}</p> : source && !source.error && <div className="user-menu-empty">
+          {items.length ? <p>{t("No commands match the current selection.")}</p> : <>
+            <strong>{t("No saved commands")}</strong>
+            {editable && <>
+              <p>{t("Save commands that use the active pane’s files and folders.")}</p>
+              <Button ref={newCommandButton} className="primary" onClick={() => add(newCommand())}><Plus aria-hidden="true" />{t("New command")}</Button>
+            </>}
+          </>}
+        </div>}
+        {editable && managing && <div className="user-menu-tools">
+            {hasEntries && <Button onClick={() => add(newCommand())}>{t("New command")}</Button>}
             <Button onClick={() => add({ kind: "submenu", label: "", hotkey: "", children: [] })}>{t("New submenu")}</Button>
             <Button onClick={() => { change((items) => [...items, separator]); setSelected(items.length); }}>{t("Add separator")}</Button>
-            <Button disabled={!current || current.entry.kind === "separator"} onClick={() => {
+            {current && <><Button disabled={current.entry.kind === "separator"} onClick={() => {
               if (current && current.entry.kind !== "separator") setEditor({ index: current.index, entry: current.entry });
             }}>{t("Edit")}</Button>
             <Button disabled={current?.entry.kind !== "submenu"} onClick={() => activate(current)}>{t("Open submenu")}</Button>
             <Button disabled={currentIndex === undefined} onClick={() => change((items) => items.filter((_, index) => index !== currentIndex))}>{t("Remove")}</Button>
             <Button disabled={currentIndex === undefined || currentIndex === 0} onClick={() => reorder(-1)}>{t("Move up")}</Button>
-            <Button disabled={currentIndex === undefined || currentIndex >= items.length - 1} onClick={() => reorder(1)}>{t("Move down")}</Button>
-          </>}
+            <Button disabled={currentIndex === undefined || currentIndex >= items.length - 1} onClick={() => reorder(1)}>{t("Move down")}</Button></>}
         </div>}
       </>}
     </div>
