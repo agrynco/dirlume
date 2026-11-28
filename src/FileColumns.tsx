@@ -48,7 +48,9 @@ const autoWidths: Record<PanelField, number> = {
 export type ColumnSamples = Partial<Record<PanelField, readonly string[]>>;
 const panelColumnFields = Object.keys(panelFields) as PanelField[];
 
-export function panelColumnTracks(columns: PanelColumn[], fitMeasuredFolders = false, status = false) {
+export const isSizeField = (field: PanelField) => field === "size" || field === "bytes";
+
+export function panelColumnTracks(columns: PanelColumn[], status = false) {
   const names = columns.filter(({ field }) => isNameField(field)).length;
   const flexibleNames = columns.filter(({ field, width }) => isNameField(field) && width === "0").length;
   const minimumPerName = names ? `min(5ch, ${55 / names}%)` : "0px";
@@ -57,18 +59,17 @@ export function panelColumnTracks(columns: PanelColumn[], fitMeasuredFolders = f
     const variable = `--${status ? "status" : "file"}-${field}-width`;
     const padded = `calc(${Number(width) || autoWidths[field]}ch + 8px)`;
     if (width === "0") return `var(${variable}, ${padded})`;
-    return fitMeasuredFolders && (field === "size" || field === "bytes")
-      ? `max(${padded}, var(${variable}, 0px))` : padded;
+    return padded;
   };
   const fixed = columns.flatMap(({ field, width }, i) => {
-    const measuredSize = fitMeasuredFolders && (field === "size" || field === "bytes");
+    const measuredSize = isSizeField(field);
     const variable = `--${status ? "status" : "file"}-${field}-width`;
     const measuredWidth = `var(${variable}, 0px)`;
     const percentage = width.endsWith("%");
     if (percentage && !measuredSize) return [];
     if (width === "0" && isNameField(field)) return [];
     const chars = Number(width) || autoWidths[field];
-    if (percentage) return [{ i, chars, expression: measuredWidth }];
+    if (measuredSize) return [{ i, chars, expression: percentage ? measuredWidth : `max(${measuredWidth}, ${preferredWidth(field, width)})` }];
     const preferred = preferredWidth(field, width);
     const expression = isNameField(field) ? `max(0px, calc(${preferred} - ${minimumPerName}))` : preferred;
     return [{ i, chars, expression }];
@@ -79,6 +80,11 @@ export function panelColumnTracks(columns: PanelColumn[], fitMeasuredFolders = f
   const hasPercentage = percentageShare > 0;
   return columns.map(({ field, width }, i) => {
     const slot = fixed.find((item) => item.i === i);
+    if (slot && isSizeField(field)) {
+      if (!width.endsWith("%")) return slot.expression;
+      const share = Number.parseInt(width, 10) / 100;
+      return `calc(${slot.expression} + max(0px, calc((100% - (${used}) - ${nameMinimum}) * ${share})))`;
+    }
     if (width.endsWith("%") && !slot) {
       const share = Number.parseInt(width, 10) / 100;
       const extra = `max(0px, calc((100% - (${used}) - ${nameMinimum}) * ${share}))`;
@@ -94,13 +100,6 @@ export function panelColumnTracks(columns: PanelColumn[], fitMeasuredFolders = f
       const proportional = `calc(${available} * ${slot.chars / totalFixed})`;
       const remaining = `calc(${available} - (${used}) + ${slot.expression})`;
       const extra = `min(${slot.expression}, max(0px, ${proportional}, ${remaining}))`;
-      if (width.endsWith("%")) {
-        // Reserve the measured label, then grant any remaining share of the row.
-        const share = Number.parseInt(width, 10) / 100;
-        const preferred = `calc((${remaining}) * ${share})`;
-        const availableShare = `max(0px, calc((${available} - (${used})) * ${share}))`;
-        return `max(${extra}, min(${preferred}, calc(${extra} + ${availableShare})))`;
-      }
       return isNameField(field) ? `calc(${minimumPerName} + ${extra})` : extra;
     }
     if (flexibleNames <= 1) return `minmax(${minimumPerName}, 1fr)`;

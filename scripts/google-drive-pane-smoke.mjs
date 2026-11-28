@@ -14,6 +14,7 @@ try {
     });
     const home = windows ? "C:\\fixture" : "/fixture";
     await page.addInitScript(({ home }) => {
+      const fileSize = 23851;
       const state = window.driveFixture = { profiles: JSON.parse(sessionStorage.getItem("drive-fixture-profiles") || "[]"),
         called: [], transfer: null, cancel: null, denied: false, changes: [], added: [], localFolder: "Local folder" };
       const profile = (id, name) => ({ id, label: name, email: id + "@example.test", signInNeeded: false });
@@ -27,7 +28,7 @@ try {
             case "locations": return [{ label: "Home", path: home }];
             case "file_icons": return args.items.map(() => null);
             case "list_directory": return { path: args.path, parent: null, omitted: 0, entries: [
-              { name: "local.txt", directory: false, hidden: false, link: false, size: 42, modified: null },
+              { name: "local.txt", directory: false, hidden: false, link: false, size: fileSize, modified: null },
               { name: state.localFolder, directory: true, hidden: false, link: false, size: null, modified: null },
             ] };
             case "operate":
@@ -56,7 +57,7 @@ try {
                 ...(state.showDestination ? [item("destination", "Demo destination", { directory: true, download: false })] : []),
               ];
               if (args.folder === "first") return [item("ordinary", "first.txt")];
-              return [...state.added, item("copy", "download.txt"), item("excel", "08.09.xlsx", {
+              return [...state.added, item("copy", "download.txt", { size: fileSize }), item("excel", "08.09.xlsx", {
                 webViewLink: "https://drive.google.com/file/d/excel/view",
               }), item("doc", "Paper", {
                 download: false, webViewLink: "https://docs.google.com/document/d/example/edit",
@@ -237,6 +238,16 @@ try {
     await button(pane("right"), "List").click();
     await duplicates.nth(1).dblclick();
     await row("left", "download.txt").waitFor();
+    const driveSize = row("left", "download.txt").locator(".file-size").first();
+    const localSize = row("right", "local.txt").locator(".file-size").first();
+    assert.equal(await driveSize.textContent(), await localSize.textContent());
+    assert.match(await driveSize.textContent(), /KiB/);
+    const originalViewport = page.viewportSize();
+    await page.setViewportSize({ width: 520, height: originalViewport.height });
+    for (const value of [driveSize, localSize]) {
+      assert.ok(await value.evaluate((cell) => cell.scrollWidth <= cell.clientWidth), "A file size was clipped in the narrow pane");
+    }
+    await page.setViewportSize(originalViewport);
     await row("left", "download.txt").click();
     await list("left").press("F5");
     const copy = page.getByRole("dialog", { name: "Copy", exact: true });
