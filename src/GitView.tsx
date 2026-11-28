@@ -7,6 +7,7 @@ import { GitChanges } from "./GitChanges";
 import { writeError } from "./gitWriteError";
 import { GitHistoryTools } from "./GitHistoryTools";
 import { GitMerge, gitOperationStatus } from "./GitMerge";
+import { GitRepositoryTools } from "./GitRepositoryTools";
 import { GitRevisionComparison } from "./GitRevisionComparison";
 import { t } from "./i18n";
 import { useTimestamps } from "./useTimestamps";
@@ -170,13 +171,15 @@ function FileRevision({ root, tip, onTarget }: { root: string; tip: string; onTa
   </div>;
 }
 
-export default function GitView({ path, side, refresh, onRefresh, onClose, onOpen, canEdit }: {
+export default function GitView({ path, side, refresh, onRefresh, onClose, onOpen, onOpenWorktree, onTerminal, canEdit }: {
   path: string;
   side: Side;
   refresh: number;
   onRefresh: () => void;
   onClose: () => void;
   onOpen: (file: NamedFile, editing: boolean) => void;
+  onOpenWorktree: (path: string) => void;
+  onTerminal: (path: string) => void;
   canEdit: (file: NamedFile) => boolean;
 }) {
   const [repository, setRepository] = useState<GitRepository | null>(null);
@@ -184,7 +187,7 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState("");
   const [changes, setChanges] = useState(false);
-  const [historyMode, setHistoryMode] = useState<"history" | "graph" | "file" | "compare" | "merge" | "tools">("history");
+  const [historyMode, setHistoryMode] = useState<"history" | "graph" | "file" | "compare" | "merge" | "tools" | "repository">("history");
   const [historyTarget, setHistoryTarget] = useState<string>();
   const [mergeState, setMergeState] = useState<GitMergeState | null>(null);
   const [selectedChange, setSelectedChange] = useState("");
@@ -361,6 +364,8 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
             onClick={() => setHistoryMode(historyMode === "merge" ? "history" : "merge")}>{t(mergeState ? gitOperationStatus(mergeState.session.operation) : "Merge branch")}</Button>
           <Button disabled={!repository || !!error || !!mergeState} aria-pressed={historyMode === "tools"}
             onClick={() => { setHistoryTarget(undefined); setHistoryMode(historyMode === "tools" ? "history" : "tools"); }}>{t("History actions")}</Button>
+          <Button disabled={!repository || !!error} aria-pressed={historyMode === "repository"}
+            onClick={() => setHistoryMode(historyMode === "repository" ? "history" : "repository")}>{t("Repository tools")}</Button>
         </div>
       </header>
       {repository && !changes && (historyMode === "merge"
@@ -369,6 +374,9 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
         : historyMode === "tools"
         ? <GitHistoryTools key={repository.root + ":" + (historyTarget ?? "")} repository={repository}
           initialTarget={historyTarget ?? tip} initialRef={historyTarget ? undefined : branch?.reference} onRefresh={onRefresh} />
+        : historyMode === "repository"
+        ? <GitRepositoryTools key={repository.root} repository={repository} refresh={refresh} onRefresh={onRefresh}
+          onOpen={onOpenWorktree} onTerminal={onTerminal} />
         : historyMode === "compare"
         ? <GitRevisionComparison key={repository.root + ":" + selected + ":" + refresh} repository={repository} target={tip} />
         : historyMode === "graph" && tip
