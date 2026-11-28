@@ -114,7 +114,7 @@ interface PaneProps {
   fileContextMenuShortcut: readonly string[];
   onShowExecutable: (path: string) => Promise<void>;
   onProcessFeedback: (text: string, error?: boolean) => void;
-  onContext: (x: number, y: number, entry?: Entry, preserveMarks?: boolean) => void;
+  onContext: (x: number, y: number, entry?: Entry, held?: boolean) => void;
   onAnalyze: (place: SpacePlace) => void;
   spaceDisabled: boolean;
   gitListing?: GitPaneListing;
@@ -176,9 +176,10 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const [quickSearch, setQuickSearch] = useQuickSearch(side, !processView);
   const list = useRef<HTMLDivElement>(null);
   const markedSet = new Set(pane.marked);
+  const itemGestures = !catalog && !processView && !covered && !pane.loading;
   const rightClick = useRightClickSelection({ list, entries: availableEntries, marked: markedSet, scope: path,
-    enabled: rightClickSelection && !catalog && !processView && !covered && !pane.loading,
-    onMark: onRightClickMark, onContext: (x, y, entry) => onContext(x, y, entry, true) });
+    enabled: rightClickSelection && itemGestures, openOnShortClick: itemGestures,
+    onMark: onRightClickMark, onContext });
   const { entries } = rightClick;
   const savedScroll = useRef<{ top: number; left: number } | null>(null);
   const columnHeader = useRef<HTMLDivElement>(null);

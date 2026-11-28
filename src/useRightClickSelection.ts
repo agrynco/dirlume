@@ -25,15 +25,17 @@ function hit<Item extends Row>(list: HTMLDivElement | null, entries: readonly It
   return index === undefined ? null : entries[Number(index)] ?? null;
 }
 
-export function useRightClickSelection<Item extends Row>({ list, entries, marked, enabled, scope, onMark, onContext }: {
+export function useRightClickSelection<Item extends Row>({ list, entries, marked, enabled, openOnShortClick = false, scope, onMark, onContext }: {
   list: RefObject<HTMLDivElement | null>;
   entries: readonly Item[];
   marked: ReadonlySet<string>;
   enabled: boolean;
+  openOnShortClick?: boolean;
   scope: string;
   onMark: (names: readonly string[], mark: boolean) => void;
-  onContext: (x: number, y: number, entry?: Item) => void;
+  onContext: (x: number, y: number, entry?: Item, held?: boolean) => void;
 }) {
+  const active = enabled || openOnShortClick;
   const gesture = useRef<Gesture<Item> | null>(null);
   const [spinner, setSpinner] = useState<Point | null>(null);
   const [gestureEntries, setGestureEntries] = useState<readonly Item[] | null>(null);
@@ -56,7 +58,7 @@ export function useRightClickSelection<Item extends Row>({ list, entries, marked
       window.removeEventListener("blur", clear);
       clear();
     };
-  }, [clear, enabled, scope]);
+  }, [clear, enabled, openOnShortClick, scope]);
 
   function move(current: Gesture<Item>, next: Point) {
     if (current.mode === "cancelled") return;
@@ -81,7 +83,7 @@ export function useRightClickSelection<Item extends Row>({ list, entries, marked
       }
       window.clearTimeout(current.timer);
       setSpinner(null);
-      if (!current.start || current.start.name === "..") {
+      if (!enabled || !current.start || current.start.name === "..") {
         current.mode = "cancelled";
         return;
       }
@@ -95,7 +97,7 @@ export function useRightClickSelection<Item extends Row>({ list, entries, marked
   }
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
-    if (!enabled || event.button !== 2 || event.pointerType !== "mouse") return;
+    if (!active || event.button !== 2 || event.pointerType !== "mouse") return;
     const listElement = list.current;
     if (!listElement) return;
     const position = point(event);
@@ -104,7 +106,7 @@ export function useRightClickSelection<Item extends Row>({ list, entries, marked
     event.preventDefault();
     clear();
     // Marked-first sorting would otherwise move rows while the pointer crosses them.
-    setGestureEntries(visibleEntries);
+    if (enabled) setGestureEntries(visibleEntries);
     listElement.focus({ preventScroll: true });
     listElement.setPointerCapture(event.pointerId);
     const current: Gesture<Item> = {
@@ -133,15 +135,16 @@ export function useRightClickSelection<Item extends Row>({ list, entries, marked
     if (current.mode !== "hold") return;
     const row = hit(list.current, visibleEntries, position);
     if (row === undefined) return;
-    if (performance.now() - current.started >= holdDelay) {
-      onContext(position.x, position.y, row && row.name !== ".." ? row : undefined);
+    const held = performance.now() - current.started >= holdDelay;
+    if (held || openOnShortClick && !enabled) {
+      onContext(position.x, position.y, row && row.name !== ".." ? row : undefined, held);
     } else if (row && row.name !== "..") {
       onMark([row.name], current.mark);
     }
   }
 
   function suppressContextMenu(event: MouseEvent) {
-    return enabled && (gesture.current !== null || event.button === 2) &&
+    return active && (gesture.current !== null || event.button === 2) &&
       !(event.target instanceof Element && event.target.closest(".inline-rename"));
   }
 

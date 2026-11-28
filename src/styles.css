@@ -676,10 +676,10 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 :is(.location-popup, .file-column-menu) button { width: 100%; justify-content: flex-start; }
 .process-menu-heading { display: grid; gap: 2px; padding: 5px 8px; max-inline-size: 260px; overflow-wrap: anywhere; }
 .process-menu-heading span { color: var(--muted); font-size: .88em; }
-.file-git-heading { padding: 4px 8px; color: var(--muted); font-weight: 600; }
-.file-menu-with-git { width: max-content; max-width: min(20rem, calc(100vw - 12px)); }
-.file-menu-with-git button { white-space: normal; text-align: start; }
-.file-git-actions button > svg { flex: none; width: 1em; height: 1em; }
+.file-item-menu, .file-menu-submenu { width: min(16rem, calc(100vw - 12px)); }
+.file-item-menu button { white-space: normal; text-align: start; }
+.file-submenu-trigger > svg:last-child { margin-inline-start: auto; }
+.file-item-menu button > svg { flex: none; width: 1em; height: 1em; }
 .file-column-check { display: grid; place-items: center; width: 15px; }
 .file-column-check svg { width: 14px; height: 14px; }
 .pane-filter { display: flex; align-items: center; gap: 7px; border-top: 1px solid var(--line); padding: 4px 8px 4px 12px; color: var(--muted); }
