@@ -104,6 +104,7 @@ fn revision_diff(
     target: &str,
     path: &str,
     previous_path: Option<&str>,
+    reverse: bool,
 ) -> Result<RevisionDiff> {
     relative_file(path)?;
     let mut args = vec!["--literal-pathspecs"];
@@ -121,6 +122,9 @@ fn revision_diff(
         "--ignore-submodules=none",
         "--submodule=short",
     ]);
+    if reverse {
+        args.push("-R");
+    }
     if let Some(base) = base {
         args.push(oid(base)?);
     }
@@ -191,6 +195,7 @@ pub async fn git_revision_diff(
     target: String,
     path: String,
     previous_path: Option<String>,
+    reverse: Option<bool>,
 ) -> Result<RevisionDiff> {
     query(move || {
         revision_diff(
@@ -200,6 +205,7 @@ pub async fn git_revision_diff(
             &target,
             &path,
             previous_path.as_deref(),
+            reverse.unwrap_or(false),
         )
     })
     .await
@@ -246,18 +252,32 @@ mod tests {
         assert_eq!(result.changes[1].path, "topic.txt");
         assert_eq!(result.changes[1].status, 'A');
         assert!(
-            revision_diff(&git, root, Some(&base), &target, "topic.txt", None)
+            revision_diff(&git, root, Some(&base), &target, "topic.txt", None, false)
                 .unwrap()
                 .patch
                 .unwrap()
                 .contains("+topic")
         );
         assert!(
-            revision_diff(&git, root, None, &initial, "shared.txt", None)
+            revision_diff(&git, root, None, &initial, "shared.txt", None, false)
                 .unwrap()
                 .patch
                 .unwrap()
                 .contains("+shared")
+        );
+        assert!(
+            revision_diff(&git, root, None, &initial, "shared.txt", None, true)
+                .unwrap()
+                .patch
+                .unwrap()
+                .contains("-shared")
+        );
+        assert!(
+            revision_diff(&git, root, Some(&base), &target, "topic.txt", None, true)
+                .unwrap()
+                .patch
+                .unwrap()
+                .contains("-topic")
         );
         assert_eq!(run(&["status", "--porcelain"]), before);
         assert_eq!(run(&["rev-parse", "HEAD"]), base);

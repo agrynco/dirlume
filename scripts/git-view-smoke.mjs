@@ -77,6 +77,12 @@ try {
             };
           case "git_revision_diff":
             assertRoot(args.root);
+            if (args.path === "review-new.txt" && args.previousPath === "review-old.txt" && args.target === hash("a") &&
+              args.base === hash("b") && !args.reverse) return { patch: "-original review\n+forward review\n", fallback: null };
+            if (args.path === "merge-review.txt" && args.target === hash("a") && args.reverse && [hash("b"), hash("c")].includes(args.base)) {
+              return { patch: "-merge result\n+mainline " + args.base[0] + "\n", fallback: null };
+            }
+            if (args.path === "review-image.png" && args.target === hash("a") && !args.reverse) return { patch: null, fallback: "binary" };
             if (args.path === "new ł.txt" && args.base === hash("b") && args.target === hash("a") && args.previousPath === null) {
               return { patch: "+new in this commit\n", fallback: null };
             }
@@ -173,11 +179,19 @@ try {
             window.gitFinishedOperation = { operation: args.session.operation, abort: args.abort };
             window.gitMerge = null;
             return null;
-          case "git_history_plan":
+          case "git_history_plan": {
             assertRoot(args.root);
+            const picking = args.action === "cherryPick";
+            const reverting = args.action === "revert";
             return { review: { action: args.action, head: hash("a"), headRef: "refs/heads/main",
               target: args.target, parent: args.parent, index: {}, trackedChanges: null },
-              parents: [], paths: [{ status: "M", path: "fixture-reset.txt", previousPath: null }], localChanges: rows };
+              subject: reverting ? "Merge feature" : picking ? "Commit under review" : null,
+              parents: reverting ? [hash("b"), hash("c")] : picking ? [hash("b")] : [],
+              paths: reverting ? args.parent ? [{ status: "M", path: "merge-review.txt", previousPath: null }] : [] : picking ? [
+                { status: "R", path: "review-new.txt", previousPath: "review-old.txt" },
+                { status: "A", path: "review-image.png", previousPath: null },
+              ] : [{ status: "M", path: "fixture-reset.txt", previousPath: null }], localChanges: rows };
+          }
           case "git_edit_history":
             assertRoot(args.root);
             window.gitEdited = args.review;
@@ -436,6 +450,14 @@ try {
   await menuItem(commitMenu, "Revert commit").click();
   assert.equal(await history.getByRole("combobox", { name: "History action", exact: true }).inputValue(), "revert");
   assert.equal(await history.getByRole("textbox", { name: "Target commit", exact: true }).inputValue(), "a".repeat(40));
+  await button(history, "Review changes").click();
+  const mainline = history.getByRole("combobox", { name: "Mainline parent", exact: true });
+  await mainline.selectOption("1");
+  await history.getByText("Inverse of the source commit", { exact: true }).waitFor();
+  await history.getByText("+mainline b", { exact: true }).waitFor();
+  await mainline.selectOption("2");
+  await history.getByText("+mainline c", { exact: true }).waitFor();
+  assert.equal(await history.getByText("+mainline b", { exact: true }).count(), 0);
   await button(history, "History actions").click();
   await merge.click();
   await history.getByText("Changed paths relative to the first parent").waitFor();
@@ -685,9 +707,23 @@ try {
   await history.getByText("Git operation completed.", { exact: true }).waitFor();
   assert.equal(await page.evaluate(() => window.gitLease.expected), "b".repeat(40));
   await actionType.selectOption("cherryPick");
+  await branches.getByRole("option", { name: "origin/topic", exact: true }).click();
   await button(history, "Review changes").click();
+  await history.getByText("origin/topic", { exact: true }).waitFor();
+  await history.getByText("main", { exact: true }).waitFor();
+  await history.getByText("Commit under review", { exact: true }).waitFor();
+  await history.getByText("+forward review", { exact: true }).waitFor();
+  await button(history, "Copy commit hash").click();
+  assert.equal(await page.evaluate(() => window.gitCopied), "a".repeat(40));
+  await button(history, "review-image.png").click();
+  await history.getByText("A text diff is unavailable for binary content.", { exact: true }).waitFor();
   await button(history, "Cherry-pick commit").click();
-  await button(page.getByRole("dialog", { name: "Cherry-pick commit", exact: true }), "Cherry-pick commit").click();
+  const pick = page.getByRole("dialog", { name: "Cherry-pick commit", exact: true });
+  await pick.getByText("A text diff is unavailable for binary content.", { exact: true }).waitFor();
+  await button(pick, "Cancel").click();
+  assert.equal(await page.evaluate(() => window.gitEdited.action), "hardReset");
+  await button(history, "Cherry-pick commit").click();
+  await button(pick, "Cherry-pick commit").click();
   await button(history, "Cherry-pick in progress").waitFor();
   await button(branches, "Close Git View").click();
   await git.click();
