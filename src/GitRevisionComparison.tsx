@@ -80,17 +80,17 @@ function UniqueCommits({ root, included, excluded, title, initial, commitActions
   </section>;
 }
 
-export function GitRevisionPatch({ root, base, target, change }: {
-  root: string; base: string | null; target: string; change: GitDetails["changes"][number];
+export function GitRevisionPatch({ root, base, target, change, reverse = false }: {
+  root: string; base: string | null; target: string; change: GitDetails["changes"][number]; reverse?: boolean;
 }) {
   const [diff, setDiff] = useState<GitRevisionDiff | null>(null);
   const [error, setError] = useState(false);
   useEffect(() => {
     let canceled = false;
-    void api.gitRevisionDiff(root, base, target, change.path, change.previousPath)
+    void api.gitRevisionDiff(root, base, target, change.path, change.previousPath, reverse)
       .then((value) => { if (!canceled) setDiff(value); }, () => { if (!canceled) setError(true); });
     return () => { canceled = true; };
-  }, [root, base, target, change]);
+  }, [root, base, target, change, reverse]);
   if (error) return <p role="alert">{t("Could not read the Git repository.")}</p>;
   if (!diff) return <p role="status">{t("Reading change…")}</p>;
   if (diff.fallback) return <p>{t(fallbackLabels[diff.fallback])}</p>;

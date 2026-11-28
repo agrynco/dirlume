@@ -516,6 +516,7 @@ export interface GitHistoryReview {
 }
 export interface GitHistoryPlan {
   review: GitHistoryReview;
+  subject: string | null;
   parents: string[];
   paths: GitDetails["changes"];
   localChanges: GitWorkingChange[];
@@ -840,8 +841,8 @@ export const api = {
     invoke<GitComparison>("git_compare_revisions", { root, base, target }),
   gitRevisionHistory: (root: string, included: string, excluded: string, offset: number) =>
     invoke<GitHistory>("git_revision_history", { root, included, excluded, offset }),
-  gitRevisionDiff: (root: string, base: string | null, target: string, path: string, previousPath: string | null) =>
-    invoke<GitRevisionDiff>("git_revision_diff", { root, base, target, path, previousPath }),
+  gitRevisionDiff: (root: string, base: string | null, target: string, path: string, previousPath: string | null, reverse = false) =>
+    invoke<GitRevisionDiff>("git_revision_diff", { root, base, target, path, previousPath, reverse }),
   gitMergeState: (root: string) => invoke<GitMergeState | null>("git_merge_state", { root }),
   gitMergePlan: (root: string, source: string) => invoke<GitMergePlan>("git_merge_plan", { root, source }),
   gitStartMerge: (root: string, review: GitMergeReview, mode: GitMergeMode) =>
