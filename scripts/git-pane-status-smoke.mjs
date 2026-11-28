@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
-import { editPaneAddress } from "./pane-address-smoke.mjs";
 
 const browser = await chromium.launch({ channel: "chrome" });
 const button = (scope, name) => scope.getByRole("button", { name, exact: true });
@@ -126,18 +125,19 @@ try {
     await page.evaluate(() => { window.fixture.delay = true; });
     await button(left, "Refresh folder").click();
     await page.waitForFunction(() => !!window.fixture.release);
-    const other = await page.evaluate(() => window.fixture.other);
-    const address = await editPaneAddress(page, "left");
-    await address.fill(other);
-    await address.press("Enter");
+    const openLocation = async (label, pathKey) => {
+      await button(left, "Locations for left pane").click();
+      await button(left, label).click();
+      const expected = await page.evaluate((key) => window.fixture[key], pathKey);
+      await page.waitForFunction((path) => document.querySelector("#left-path")?.dataset.path === path &&
+        document.querySelector("#left-files")?.getAttribute("aria-busy") === "false", expected);
+    };
+    await openLocation("Downloads", "other");
     await left.getByText("local-main", { exact: true }).waitFor({ state: "hidden" });
     await page.evaluate(() => window.fixture.release());
     await leftFiles.getByRole("option", { name: /^note ł\.txt(?!.*Modified)/ }).waitFor();
     await page.evaluate(() => { window.fixture.delay = false; window.fixture.unborn = true; });
-    const original = await page.evaluate(() => window.fixture.root);
-    const rootAddress = await editPaneAddress(page, "left");
-    await rootAddress.fill(original);
-    await rootAddress.press("Enter");
+    await openLocation("Home", "root");
     await left.getByText("local-main · No commits yet", { exact: true }).waitFor();
     await note.waitFor();
     await note.click({ button: "right" });
