@@ -35,14 +35,17 @@ export async function testFilenameRendering(page, root) {
   }, selected);
   await page.evaluate(() => document.fonts.ready.then(() => {}));
   const resize = page.getByRole("separator", { name: "Pane divider", exact: true });
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const names = await Promise.all(forms.map((form) => dimensions(form, false)));
-    if (names.every(({ overflowing }) => !overflowing)) break;
-    await resize.press("ArrowRight");
-  }
   for (let index = 0; index < forms.length; index++) {
     await rows.and(pane.locator("[data-tooltip=" + JSON.stringify(forms[index]) + "]")).click();
-    const values = await Promise.all(forms.map((form, other) => dimensions(form, other === index)));
+    const selectedDimensions = () => Promise.all(forms.map((form, other) => dimensions(form, other === index)));
+    let values = await selectedDimensions();
+    // Measure after selection and leave room for rounding the fractional text width.
+    for (let attempt = 0; attempt < 40 && values.some(
+      ({ overflowing, width, visibleWidth }) => overflowing || visibleWidth < Math.ceil(width) + 1,
+    ); attempt++) {
+      await resize.press("ArrowRight");
+      values = await selectedDimensions();
+    }
     for (const value of values) {
       assert.equal(value.fontSize, "15px");
       assert.match(value.fontFamily, /GoMono Nerd Font Mono/);
