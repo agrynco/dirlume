@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { ArrowDown, ArrowUp, GitBranchPlus, History, ListChecks, Undo2, Upload } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, FileDiff, GitBranchPlus, History, ListChecks, Undo2, Upload } from "lucide-react";
 import {
   api, type GitHistoryAction, type GitHistoryPlan, type GitPushReview, type GitRebaseAction,
   type GitRebasePlan, type GitRebaseStep, type GitReflog, type GitReflogEntry, type GitRepository,
@@ -7,6 +7,8 @@ import {
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { GitActionButtons, useGitMenu, type GitAction } from "./GitActions";
+import { GitRevisionChange } from "./GitRevisionComparison";
+import type { ComparisonShortcuts } from "./TextTools";
 import { writeError } from "./gitWriteError";
 import { t } from "./i18n";
 
@@ -33,20 +35,54 @@ function CommitHash({ hash }: { hash: string }) {
   return <code title={hash}>{hash.slice(0, 12)}</code>;
 }
 
-function Impact({ plan }: { plan: GitHistoryPlan }) {
-  const effect = resetEffects[plan.review.action];
-  const local = plan.localChanges.filter(({ group }) => group !== "untracked");
+function Impact({ root, plan, selectedPath, onSelectPath, shortcuts }: {
+  root: string; plan: GitHistoryPlan; selectedPath: string | undefined; onSelectPath: (path: string) => void;
+  shortcuts: ComparisonShortcuts;
+}) {
+  const { action, target, head, headRef, parent } = plan.review;
+  const effect = resetEffects[action];
+  const revert = action === "revert";
+  const replay = action === "cherryPick" || revert;
+  const base = plan.parents[(parent ?? 1) - 1] ?? null;
+  const change = plan.paths.find(({ path }) => path === selectedPath) ?? plan.paths[0];
+  const local = plan.localChanges.filter(({ group }) => replay || group !== "untracked");
+  const [copyStatus, setCopyStatus] = useState("");
+  const destination = headRef?.replace(/^refs\/heads\//, "") ?? t("Detached HEAD");
+  const parentLabel = base ? <CommitHash hash={base} /> : t("Empty tree");
   return <>
-    <dl><dt>{t("Current branch")}</dt><dd>{plan.review.headRef ?? "HEAD"} <CommitHash hash={plan.review.head} /></dd>
-      <dt>{t("Target commit")}</dt><dd><CommitHash hash={plan.review.target} /></dd></dl>
+    <dl className="git-history-impact">
+      <dt>{t(replay ? "Applies to" : "Current branch")}</dt>
+      <dd>{replay ? <strong>{destination}</strong> : headRef ?? "HEAD"} <CommitHash hash={head} /></dd>
+      <dt>{t(replay ? "Source commit" : "Target commit")}</dt>
+      <dd>{replay ? <>
+        <strong>{plan.subject || t("No subject")}</strong>
+        <div className="git-history-source"><code>{target}</code>
+          <Button type="button" className="icon-button" aria-label={t("Copy commit hash")} tooltip={t("Copy commit hash")}
+            onClick={() => void api.copyText(target).then(() => setCopyStatus(t("Commit hash copied.")),
+              () => setCopyStatus(t("Could not copy the commit hash.")))}><Copy aria-hidden="true" /></Button>
+        </div>
+        {copyStatus && <span role="status">{copyStatus}</span>}
+      </> : <CommitHash hash={target} />}</dd>
+      {replay && <><dt>{t("Reviewed parent")}</dt><dd>{parent && <>{parent} · </>}{parentLabel}</dd></>}
+    </dl>
     {effect && <p>{t(effect)}</p>}
+    {replay && <p>{t("Git applies this patch to the checked-out destination and may report conflicts.")}</p>}
     <h3>{t("Changed paths")}</h3>
-    {plan.paths.length ? <ul>{plan.paths.map(({ path, previousPath }) =>
-      <li key={path}>{previousPath ? previousPath + " → " + path : path}</li>)}</ul> : <p>{t("No changed paths.")}</p>}
+    {plan.paths.length ? <ul className={replay ? "git-history-paths" : undefined}>{plan.paths.map(({ path, previousPath }) => {
+      const label = previousPath ? (revert ? path + " → " + previousPath : previousPath + " → " + path) : path;
+      return <li key={path}>{replay ? <Button aria-pressed={change?.path === path} onClick={() => onSelectPath(path)}>
+        <FileDiff aria-hidden="true" />{label}
+      </Button> : label}</li>;
+    })}</ul> : <p>{t("No changed paths.")}</p>}
+    {replay && change && <section className="git-history-patch" aria-label={t("Change preview")}>
+      <h3>{t(revert ? "Inverse of the source commit" : "Source commit changes")}</h3>
+      <GitRevisionChange key={JSON.stringify([base, target, change.path, revert])} root={root} base={base} target={target}
+        change={change} reverse={revert} shortcuts={shortcuts} />
+    </section>}
     {local.length > 0 && <>
       <h3>{t("Local changes")}</h3>
       <ul>{local.map(({ path, group }) =>
-        <li key={group + path}>{t(group === "staged" ? "Staged" : "Unstaged")} · {path}</li>)}</ul>
+        <li key={group + path}>{t(group === "staged" ? "Staged" : group === "untracked" ? "Untracked" : "Unstaged")} · {path}</li>)}</ul>
     </>}
   </>;
 }
@@ -72,8 +108,9 @@ function PushImpact({ review }: { review: GitPushReview }) {
   </>;
 }
 
-export function GitHistoryTools({ repository, initialTarget, initialRef, initialAction, onRefresh }: {
+export function GitHistoryTools({ repository, initialTarget, initialRef, initialAction, onRefresh, shortcuts }: {
   repository: GitRepository; initialTarget?: string; initialRef?: string; initialAction?: Action; onRefresh: () => void;
+  shortcuts: ComparisonShortcuts;
 }) {
   const menu = useGitMenu();
   const root = repository.root;
@@ -85,6 +122,7 @@ export function GitHistoryTools({ repository, initialTarget, initialRef, initial
   const [remotes, setRemotes] = useState<string[]>();
   const [remote, setRemote] = useState("");
   const [preview, setPreview] = useState<Preview>();
+  const [selectedPath, setSelectedPath] = useState<string>();
   const [steps, setSteps] = useState<GitRebaseStep[]>([]);
   const [reflog, setReflog] = useState<GitReflog>();
   const [confirmation, setConfirmation] = useState<Confirmation>();
@@ -106,6 +144,7 @@ export function GitHistoryTools({ repository, initialTarget, initialRef, initial
 
   function clearPreview() {
     setPreview(undefined);
+    setSelectedPath(undefined);
     setError("");
     setFeedback("");
   }
@@ -123,6 +162,7 @@ export function GitHistoryTools({ repository, initialTarget, initialRef, initial
     setError("");
     setFeedback("");
     setPreview(undefined);
+    setSelectedPath(undefined);
     try {
       if (action === "rebase") {
         const value = await api.gitRebasePlan(root, target.trim());
@@ -200,7 +240,7 @@ export function GitHistoryTools({ repository, initialTarget, initialRef, initial
     run: () => setConfirmation(preview.kind === "rebase" ? { ...preview, steps: [...steps] } : preview),
   }] : [];
 
-  return <div className="git-scroll git-revision-comparison" aria-label={t("History actions")} tabIndex={-1}
+  return <div className="git-scroll git-revision-comparison git-history-tools" aria-label={t("History actions")} tabIndex={-1}
     {...menu([prepare, ...submit])}>
     <p><code>{root}</code></p>
     <form onSubmit={(event) => { event.preventDefault(); void requestPreview(); }}>
@@ -245,7 +285,7 @@ export function GitHistoryTools({ repository, initialTarget, initialRef, initial
           {preview.value.parents.map((hash, index) => <option key={hash} value={index + 1}>{index + 1} · {hash.slice(0, 12)}</option>)}
         </select>
       </label>}
-      {!mustChooseParent && <Impact plan={preview.value} />}
+      {!mustChooseParent && <Impact root={root} plan={preview.value} selectedPath={selectedPath} onSelectPath={setSelectedPath} shortcuts={shortcuts} />}
     </>}
     {preview?.kind === "push" && <PushImpact review={preview.value} />}
     {preview?.kind === "rebase" && <>
@@ -288,29 +328,32 @@ export function GitHistoryTools({ repository, initialTarget, initialRef, initial
       {reflog.nextOffset !== null && <Button disabled={pending}
         onClick={() => void requestPreview(null, reflog.nextOffset ?? 0)}>{t("Load more")}</Button>}
     </>}
-    {confirmation && <Dialog title={t(heading)} helpTopic="gitView" onClose={pending ? undefined : () => setConfirmation(undefined)}
+    {confirmation && <Dialog title={t(heading)} helpTopic="gitView" wide={action === "cherryPick" || action === "revert"}
+      onClose={pending ? undefined : () => setConfirmation(undefined)}
       footer={<>
         <Button disabled={pending} data-initial-focus={destructive || undefined} onClick={() => setConfirmation(undefined)}>{t("Cancel")}</Button>
         <Button disabled={pending || confirmation.kind === "recover" && !confirmation.branch.trim()}
           className={destructive ? "negative" : undefined}
           onClick={() => void runConfirmed()}>{t(heading)}</Button>
       </>}>
-      <p><code>{root}</code></p>
-      {confirmation.kind === "recover" ? <>
-        <p><CommitHash hash={confirmation.entry.hash} /> {confirmation.entry.subject}</p>
-        <label className="field">{t("Branch name")}
-          <input autoFocus value={confirmation.branch} disabled={pending} autoComplete="off" spellCheck={false}
-            onChange={(event) => setConfirmation({ ...confirmation, branch: event.target.value })} />
-        </label>
-      </> : confirmation.kind === "push" ? <PushImpact review={confirmation.value} />
-        : confirmation.kind === "edit" ? <Impact plan={confirmation.value} /> : <>
-          <RebaseImpact plan={confirmation.value} />
-          <h3>{t("Commit sequence")}</h3>
-          {confirmation.steps?.length ? <ol>{confirmation.steps.map((step) =>
-            <li key={step.hash}>{t(stepLabels[step.action])} <CommitHash hash={step.hash} /> {step.message ??
-              confirmation.value.commits.find(({ hash }) => hash === step.hash)?.subject}</li>)}</ol>
-            : <p>{t("No commits to replay.")}</p>}
-        </>}
+      <div className="dialog-body git-history-confirmation">
+        <p><code>{root}</code></p>
+        {confirmation.kind === "recover" ? <>
+          <p><CommitHash hash={confirmation.entry.hash} /> {confirmation.entry.subject}</p>
+          <label className="field">{t("Branch name")}
+            <input autoFocus value={confirmation.branch} disabled={pending} autoComplete="off" spellCheck={false}
+              onChange={(event) => setConfirmation({ ...confirmation, branch: event.target.value })} />
+          </label>
+        </> : confirmation.kind === "push" ? <PushImpact review={confirmation.value} />
+          : confirmation.kind === "edit" ? <Impact root={root} plan={confirmation.value} selectedPath={selectedPath} onSelectPath={setSelectedPath} shortcuts={shortcuts} /> : <>
+            <RebaseImpact plan={confirmation.value} />
+            <h3>{t("Commit sequence")}</h3>
+            {confirmation.steps?.length ? <ol>{confirmation.steps.map((step) =>
+              <li key={step.hash}>{t(stepLabels[step.action])} <CommitHash hash={step.hash} /> {step.message ??
+                confirmation.value.commits.find(({ hash }) => hash === step.hash)?.subject}</li>)}</ol>
+              : <p>{t("No commits to replay.")}</p>}
+          </>}
+      </div>
     </Dialog>}
   </div>;
 }

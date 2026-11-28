@@ -1,19 +1,23 @@
 import { useEffect, useState } from "react";
 import { Archive, ArrowDownToLine, ArrowUpFromLine, Eye, Layers, Trash2 } from "lucide-react";
-import { api, type GitStashAction, type GitStashEntry, type GitStashPreview, type GitWorkingIndex } from "./api";
+import { api, type GitStashAction, type GitStashChange, type GitStashEntry, type GitStashPreview, type GitWorkingIndex } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { GitActionButtons, useGitMenu, type GitAction } from "./GitActions";
 import { writeError } from "./gitWriteError";
 import { t } from "./i18n";
+import { GitRevisionChange } from "./GitRevisionComparison";
+import type { ComparisonShortcuts } from "./TextTools";
 
 const actions: Record<GitStashAction, string> = { apply: "Apply stash", pop: "Pop stash", drop: "Drop stash" };
 const icons = { apply: ArrowDownToLine, pop: ArrowUpFromLine, drop: Trash2 };
 const versions = { combined: "All stash changes", staged: "Staged", working: "Unstaged" } as const;
 const stashId = (entry: GitStashEntry) => entry.position + ":" + entry.hash;
+const changeId = ({ target, change }: GitStashChange) => JSON.stringify([target, change.path]);
 
-export function GitStashes({ root, index, refresh, onRefresh, onClose }: {
+export function GitStashes({ root, index, refresh, onRefresh, onClose, shortcuts }: {
   root: string; index?: GitWorkingIndex | null; refresh: number; onRefresh: () => void; onClose: () => void;
+  shortcuts: ComparisonShortcuts;
 }) {
   const menu = useGitMenu();
   const [entries, setEntries] = useState<GitStashEntry[]>();
@@ -23,6 +27,7 @@ export function GitStashes({ root, index, refresh, onRefresh, onClose }: {
   const [restoreIndex, setRestoreIndex] = useState(true);
   const [preview, setPreview] = useState<GitStashPreview>();
   const [version, setVersion] = useState<keyof GitStashPreview>("combined");
+  const [selectedChange, setSelectedChange] = useState<string>();
   const [review, setReview] = useState<{ entry: GitStashEntry; action: GitStashAction }>();
   const [error, setError] = useState("");
   const [previewError, setPreviewError] = useState("");
@@ -31,6 +36,7 @@ export function GitStashes({ root, index, refresh, onRefresh, onClose }: {
   const [pending, setPending] = useState(false);
   const entry = entries?.find((value) => stashId(value) === selected) ?? entries?.[0];
   const diff = preview?.[version];
+  const changed = diff?.find((change) => changeId(change) === selectedChange) ?? diff?.[0];
   useEffect(() => {
     let canceled = false;
     void api.gitStashes(root).then((values) => { if (!canceled) setEntries(values); },
@@ -118,8 +124,17 @@ export function GitStashes({ root, index, refresh, onRefresh, onClose }: {
           <GitActionButtons actions={versionActions} />
         </div>
         {previewError ? <p role="alert">{previewError}</p> : !diff ? <p role="status">{t("Reading change…")}</p> :
-          diff.patch ? <pre className="git-patch" tabIndex={0} aria-label={t("Stash diff")}>{diff.patch}</pre> :
-            <p>{t(diff.fallback ? "A text diff is unavailable for this change." : "No changed paths.")}</p>}
+          changed ? <section aria-label={t("Stash diff")}>
+            <ul className="git-history-paths" aria-label={t("Changed paths")}>
+              {diff.map((file) => <li key={changeId(file)}><Button aria-pressed={changed === file}
+                onClick={() => setSelectedChange(changeId(file))}>
+                {file.change.previousPath ? file.change.previousPath + " → " + file.change.path : file.change.path}
+                {file.base === null && <> · {t("Untracked")}</>}
+              </Button></li>)}
+            </ul>
+            <GitRevisionChange key={changeId(changed)} root={root} base={changed.base} target={changed.target}
+              change={changed.change} shortcuts={shortcuts} />
+          </section> : <p>{t("No changed paths.")}</p>}
         <label className="field-checkbox"><input type="checkbox" checked={restoreIndex} disabled={pending}
           onChange={(event) => setRestoreIndex(event.target.checked)} />{t("Restore staged changes to the index")}</label>
         <div className="git-branch-actions">

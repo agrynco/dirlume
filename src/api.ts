@@ -382,6 +382,19 @@ export interface DiskSpace {
   total: number;
 }
 
+export interface GoogleDriveQuota {
+  limit: number | null;
+  usage: number | null;
+  usageInDrive: number | null;
+  usageInDriveTrash: number | null;
+}
+
+export interface GoogleDriveSpacePage {
+  items: { id: string; name: string; directory: boolean; quotaBytes: number | null }[];
+  nextPageToken: string | null;
+  partial: boolean;
+}
+
 export interface VolumeInformation {
   path: string;
   share: boolean;
@@ -448,6 +461,59 @@ export interface GitDetails {
   changes: { status: string; path: string; previousPath: string | null }[];
 }
 
+export interface GitFileCommit extends GitCommit {
+  parent: string | null;
+  merge: boolean;
+  change: GitDetails["changes"][number];
+}
+
+export type GitFileContent = { state: "available"; text: string } | { state: "missing" | "binary" | "oversized" };
+export interface GitFileContext {
+  root: string;
+  path: string;
+  head: string | null;
+  hasHistory: boolean;
+  hasBlame: boolean;
+  hasDiff: boolean;
+}
+export type GitFileLaunch = { path: string; action: "history" | "blame" | "compare"; head: string } | { path: string; action: "diff" };
+export type GitPaneSource = { kind: "local"; directory: string } | { kind: "ssh"; id: number; segments: string[] };
+export interface GitPaneStatus {
+  root: string;
+  prefix: string;
+  head: string | null;
+  headRef: string | null;
+  metadata: string | null;
+  changes: GitWorkingChange[];
+}
+export type GitPaneRequest = { kind: "diff"; path: string; head: string | null } |
+  { kind: "compare"; path: string; revision: string; previousPath?: string } |
+  { kind: "revision"; path: string; revision: string } | { kind: "history"; path: string; tip: string; offset: number };
+export type GitTextVersions = { left: GitFileContent; right: GitFileContent };
+export type GitPaneFileDiff = { change: GitWorkingChange; versions: GitTextVersions | null };
+export type GitFileHistoryPage = { commits: GitFileCommit[]; nextOffset: number | null };
+type GitPaneReadResults = { diff: GitPaneFileDiff[]; compare: GitTextVersions; history: GitFileHistoryPage; revision: GitFileContent };
+export interface GitBlameLine {
+  number: number;
+  original: number;
+  hash: string;
+  author: string;
+  time: number;
+  path: string;
+  text: string;
+}
+export interface GitFileBlame {
+  revision: string;
+  path: string;
+  content: { state: "available"; lines: GitBlameLine[] } | { state: "empty" | "missing" | "binary" | "oversized" };
+}
+
+export interface GitFileRevision {
+  revision: string;
+  path: string;
+  content: GitFileContent;
+}
+
 export interface GitComparison {
   base: string;
   target: string;
@@ -502,6 +568,7 @@ export interface GitHistoryReview {
 }
 export interface GitHistoryPlan {
   review: GitHistoryReview;
+  subject: string | null;
   parents: string[];
   paths: GitDetails["changes"];
   localChanges: GitWorkingChange[];
@@ -594,7 +661,8 @@ export interface GitHunkPlan { review: GitHunkReview; hunks: string[] }
 export interface GitDiscardReview { expected: GitIndexSnapshot; change: GitWorkingChange; stamps: unknown[] }
 export interface GitDiscardPlan { review: GitDiscardReview; diff: GitWorkingDiff }
 export interface GitStashEntry { hash: string; position: number; subject: string }
-export interface GitStashPreview { combined: GitRevisionDiff; staged: GitRevisionDiff; working: GitRevisionDiff }
+export interface GitStashChange { base: string | null; target: string; change: GitDetails["changes"][number] }
+export interface GitStashPreview { combined: GitStashChange[]; staged: GitStashChange[]; working: GitStashChange[] }
 export type GitStashAction = "apply" | "pop" | "drop";
 export interface GitStashResult { changes: GitWorkingChange[]; error: string | null }
 export interface GitWorkingDiff {
@@ -603,6 +671,7 @@ export interface GitWorkingDiff {
   patch: string | null;
   fallback: "binary" | "conflict" | "oversized" | "unsupported" | null;
   unborn: boolean;
+  versions?: { left: GitFileContent; right: GitFileContent } | null;
 }
 
 export type EnvironmentScope = "user" | "system" | "process";
@@ -777,6 +846,9 @@ export const api = {
   renameGoogleDrive: (id: string, label: string) => invoke<void>("rename_google_drive", { id, label }),
   removeGoogleDrive: (id: string) => invoke<void>("remove_google_drive", { id }),
   listGoogleDrive: (id: string, folder: string) => invoke<GoogleDriveItem[]>("list_google_drive", { id, folder }),
+  googleDriveQuota: (id: string) => invoke<GoogleDriveQuota>("google_drive_quota", { id }),
+  googleDriveSpacePage: (id: string, folder: string, pageToken: string | null, validateFolder: boolean) =>
+    invoke<GoogleDriveSpacePage>("google_drive_space_page", { id, folder, pageToken, validateFolder }),
   changeGoogleDrive: (id: string, change: GoogleDriveChange) => invoke<string | null>("change_google_drive", { id, change }),
   startMcp: () => invoke<McpConnection>("start_mcp"),
   stopMcp: () => invoke<void>("stop_mcp"),
@@ -814,9 +886,16 @@ export const api = {
   gitGraphUpstream: (root: string, reference: string) =>
     invoke<{ reference: string; tip: string } | null>("git_graph_upstream", { root, reference }),
   gitFileHistory: (root: string, tip: string, path: string, offset: number) =>
-    invoke<GitHistory>("git_file_history", { root, tip, path, offset }),
+    invoke<{ commits: GitFileCommit[]; nextOffset: number | null }>("git_file_history", { root, tip, path, offset }),
+  gitFileRevision: (root: string, revision: string, path: string) =>
+    invoke<GitFileRevision>("git_file_revision", { root, revision, path }),
   gitFileBlame: (root: string, tip: string, path: string) =>
-    invoke<string>("git_file_blame", { root, tip, path }),
+    invoke<GitFileBlame>("git_file_blame", { root, tip, path }),
+  gitFileContext: (directory: string, name: string) => invoke<GitFileContext>("git_file_context", { directory, name }),
+  gitPaneStatus: (source: GitPaneSource) => invoke<GitPaneStatus>("git_pane_status", { source }),
+  gitPaneRead: <Request extends GitPaneRequest>(source: GitPaneSource, root: string, request: Request) =>
+    invoke<GitPaneReadResults[Request["kind"]]>("git_pane_read", { source, root, request }),
+  gitWorkingFileContent: (root: string, path: string) => invoke<GitFileContent>("git_working_file_content", { root, path }),
   gitDetails: (root: string, hash: string) => invoke<GitDetails>("git_details", { root, hash }),
   gitUpdateBranch: (root: string, request: GitBranchRequest) =>
     invoke<GitRepository>("git_update_branch", { root, request }),
@@ -824,8 +903,8 @@ export const api = {
     invoke<GitComparison>("git_compare_revisions", { root, base, target }),
   gitRevisionHistory: (root: string, included: string, excluded: string, offset: number) =>
     invoke<GitHistory>("git_revision_history", { root, included, excluded, offset }),
-  gitRevisionDiff: (root: string, base: string | null, target: string, path: string, previousPath: string | null) =>
-    invoke<GitRevisionDiff>("git_revision_diff", { root, base, target, path, previousPath }),
+  gitRevisionDiff: (root: string, base: string | null, target: string, path: string, previousPath: string | null, reverse = false) =>
+    invoke<GitRevisionDiff>("git_revision_diff", { root, base, target, path, previousPath, reverse }),
   gitMergeState: (root: string) => invoke<GitMergeState | null>("git_merge_state", { root }),
   gitMergePlan: (root: string, source: string) => invoke<GitMergePlan>("git_merge_plan", { root, source }),
   gitStartMerge: (root: string, review: GitMergeReview, mode: GitMergeMode) =>
@@ -903,7 +982,7 @@ export const api = {
     invoke<GitRemoteRefReview>("git_remote_ref_review", { root, remote, source, destination }),
   gitTransferRemoteRef: (root: string, review: GitRemoteRefReview) =>
     invoke<string>("git_transfer_remote_ref", { root, review }),
-  gitWorkingDiff: (root: string, change: GitWorkingChange) => invoke<GitWorkingDiff>("git_working_diff", { root, change }),
+  gitWorkingDiff: (root: string, change: GitWorkingChange, compare = false) => invoke<GitWorkingDiff>("git_working_diff", { root, change, compare }),
   environmentScope: (scope: EnvironmentScope) => invoke<{ rows: EnvironmentRow[]; info: EnvironmentInfo }>("environment_scope", { scope }),
   environmentValue: (scope: EnvironmentScope, name: string) => invoke<EnvironmentValue | null>("environment_value", { scope, name }),
   saveEnvironment: (scope: EnvironmentScope, edits: EnvironmentEdit[], integrate = false) =>

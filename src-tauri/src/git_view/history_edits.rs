@@ -34,6 +34,7 @@ pub struct HistoryReview {
 #[serde(rename_all = "camelCase")]
 pub struct HistoryPlan {
     review: HistoryReview,
+    subject: Option<String>,
     parents: Vec<String>,
     paths: Vec<Change>,
     local_changes: Vec<WorkingChange>,
@@ -103,6 +104,25 @@ fn review(
     let head = repo.head.ok_or(WriteError::UnsupportedChange)?;
     let target = local_commit(git, root, target)?;
     let replay = matches!(action, HistoryAction::CherryPick | HistoryAction::Revert);
+    let subject = replay
+        .then(|| {
+            line(git_bytes(
+                git,
+                root,
+                &[
+                    "show",
+                    "--no-patch",
+                    "--no-notes",
+                    "--no-show-signature",
+                    "--no-color",
+                    "--format=%s",
+                    &target,
+                    "--",
+                ],
+            )?)
+            .map_err(WriteError::from)
+        })
+        .transpose()?;
     let mut parents = Vec::new();
     let paths = if replay {
         let line = line(success(run(
@@ -131,8 +151,10 @@ fn review(
         }
         changed_paths(git, root, &head, &target)?
     };
-    let tracked_changes = if action == HistoryAction::HardReset {
+    if action == HistoryAction::HardReset {
         protect_untracked(git, root, &target)?;
+    }
+    let tracked_changes = if action == HistoryAction::HardReset || replay {
         let changes = git_bytes(
             git,
             root,
@@ -165,6 +187,7 @@ fn review(
             index,
             tracked_changes,
         },
+        subject,
         parents,
         paths,
         local_changes: working_changes(git, root)?,
@@ -391,6 +414,9 @@ mod tests {
         let topic = cli(&["rev-parse", "HEAD"]);
         cli(&["switch", "main"]);
         let pick = review(&git, &source, HistoryAction::CherryPick, &topic, None).unwrap();
+        assert_eq!(pick.subject.as_deref(), Some("Topic"));
+        assert_eq!(pick.review.head_ref.as_deref(), Some("refs/heads/main"));
+        assert_eq!(pick.parents, std::slice::from_ref(&base));
         apply(&git, &source, &pick.review).unwrap();
         assert_eq!(
             fs::read_to_string(source.join("topic.txt")).unwrap(),
@@ -408,6 +434,44 @@ mod tests {
         assert!(entries.entries.iter().any(|entry| entry.hash == reverted));
         recover(&git, &source, &reverted, "rescued").unwrap();
         assert_eq!(cli(&["rev-parse", "rescued"]), reverted);
+    }
+
+    #[test]
+    fn reviews_the_selected_parent_and_detects_changed_working_files() {
+        let git = executable().unwrap();
+        let store = tempfile::tempdir().unwrap();
+        let root = store.path();
+        let cli = |args: &[&str]| super::super::tests::git(root, args);
+        cli(&["init", "-b", "main"]);
+        cli(&["config", "user.name", "Fixture"]);
+        cli(&["config", "user.email", "fixture@example.invalid"]);
+        cli(&["config", "commit.gpgsign", "false"]);
+        fs::write(root.join("tracked.txt"), "base\n").unwrap();
+        cli(&["add", "."]);
+        cli(&["commit", "-m", "Base"]);
+        cli(&["switch", "-c", "topic"]);
+        fs::write(root.join("topic.txt"), "topic\n").unwrap();
+        cli(&["add", "."]);
+        cli(&["commit", "-m", "Topic working version"]);
+        cli(&["switch", "main"]);
+        fs::write(root.join("main.txt"), "main\n").unwrap();
+        cli(&["add", "."]);
+        cli(&["commit", "-m", "Main working version"]);
+        cli(&["merge", "--no-ff", "topic", "-m", "Merge topic"]);
+        let merged = cli(&["rev-parse", "HEAD"]);
+        let first = review(&git, root, HistoryAction::Revert, &merged, Some(1)).unwrap();
+        let second = review(&git, root, HistoryAction::Revert, &merged, Some(2)).unwrap();
+        assert_eq!(first.subject.as_deref(), Some("Merge topic"));
+        assert_eq!(first.paths[0].path, "topic.txt");
+        assert_eq!(second.paths[0].path, "main.txt");
+        assert!(cli(&["status", "--porcelain"]).is_empty());
+        fs::write(root.join("tracked.txt"), "changed after review\n").unwrap();
+        assert!(matches!(
+            apply(&git, root, &second.review),
+            Err(WriteError::Stale)
+        ));
+        assert_eq!(cli(&["rev-parse", "HEAD"]), merged);
+        assert!(root.join("main.txt").is_file());
     }
 
     #[test]

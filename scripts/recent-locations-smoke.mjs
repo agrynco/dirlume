@@ -9,6 +9,14 @@ const recentPane = (page, side) => page.getByRole("region", { name: "Recent loca
 const fileRow = (page, side, name) => page.locator('#' + side + '-files [data-tooltip=' + JSON.stringify(name) + ']');
 const stored = (page) => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? "[]"), store);
 const calls = (page) => page.evaluate(() => window.recentFixture.calls);
+async function saveShortcut(page, side, group) {
+  const list = page.locator("#" + side + "-files");
+  await list.dispatchEvent("keydown", { key: String(group), code: "Digit" + group, ctrlKey: true, shiftKey: true,
+    bubbles: true, cancelable: true });
+  const editor = page.getByRole("dialog", { name: "Folder shortcuts", exact: true });
+  await button(editor, "Save").click();
+  await editor.waitFor({ state: "hidden" });
+}
 const waitPath = (page, side, path) => page.waitForFunction(({ side, path }) =>
   document.getElementById(side + "-path")?.dataset.path === path &&
   document.getElementById(side + "-files")?.getAttribute("aria-busy") === "false", { side, path });
@@ -60,12 +68,20 @@ try {
       localStorage.setItem("dirlume.smb-locations", JSON.stringify([
         { kind: "smb", id: "smb-profile", label: "Saved SMB", path: smb },
       ]));
+      if (!localStorage.getItem("dirlume.collections.v1")) {
+        localStorage.setItem("dirlume.collections.v1", JSON.stringify([
+          { kind: "folder", id: "fixture-collection", name: "Fixture collection", children: [
+            { kind: "folder", id: "fixture-nested", name: "Nested collection", children: [] },
+          ] },
+        ]));
+      }
       const folder = (name) => ({ name, directory: true, hidden: false, link: false, size: null, modified: null });
       const listing = (entries = []) => ({ entries, omitted: 0, elevated: false });
       const nested = (segments) => segments.length ? listing() : listing([folder("nested")]);
       const localListing = (path) => ({
         path, parent: path === home ? null : path.slice(0, path.lastIndexOf(sep)),
-        ...listing(path === home ? [folder("Local folder"), folder("Downloads folder")] : []),
+        ...listing(path === home ? [folder("Local folder"), folder("Downloads folder"),
+          { ...folder("fixture.zip"), directory: false, size: 1 }] : []),
       });
       const network = (kind, id, address, segments = []) => ({
         id, address, origin: kind + "://fixture", segments, listing: nested(segments),
@@ -76,6 +92,13 @@ try {
           switch (command) {
             case "locations": return [{ label: "Home", path: home }, { label: "Downloads", path: downloads }];
             case "list_directory": return localListing(args.path);
+            case "open_archive": return { id: 4001, path: args.path, parent: home, writable: true, canAdd: true, listing: nested([]) };
+            case "list_archive":
+              state.calls.push([command, args.segments]);
+              return nested(args.segments);
+            case "connect_lan_group_peer":
+              state.calls.push([command, args.peer, args.segments]);
+              return { ...network("https", 7001, "LAN host", args.segments), share: "lan-share" };
             case "file_icons": return args.items.map(() => null);
             case "ftp_profiles": return [{ id: "ftp-profile", label: "Saved FTP", host: "ftp.example", port: 21, hasSecret: true }];
             case "ssh_profiles": return [{ id: "ssh-profile", label: "Saved SFTP", host: "ssh.example", port: 22, hasSecret: true }];
@@ -126,25 +149,47 @@ try {
 
     await fileRow(page, "left", "Local folder").dblclick();
     await waitPath(page, "left", local);
+    await saveShortcut(page, "left", 1);
     const providers = [["NetBox", "Saved FTP"], ["NetBox", "Saved SFTP"], ["Remote machine", "Saved Server"]];
-    for (const [name, profile] of providers) {
+    for (const [index, [name, profile]] of providers.entries()) {
       await openSource(page, "left", name);
       await fileRow(page, "left", profile).dblclick();
       await fileRow(page, "left", "nested").dblclick();
       await waitPath(page, "left", "/nested");
+      await saveShortcut(page, "left", index + 2);
     }
     if (windows) {
       await openSource(page, "left", "SMB");
       await fileRow(page, "left", "Saved SMB").dblclick();
       await waitPath(page, "left", smb);
+      await saveShortcut(page, "left", 5);
       await button(filePane(page, "left"), "Locations for left pane").click();
       await page.getByRole("group", { name: "KS fixture host", exact: true }).getByRole("button", { name: /^C:.*Fixed/ }).click();
       await fileRow(page, "left", "nested").dblclick();
       await waitPath(page, "left", "C:\\nested");
+      await saveShortcut(page, "left", 6);
     }
     await openSource(page, "left", "Home");
     await waitPath(page, "left", home);
-    const snapshot = await stored(page);
+    await fileRow(page, "left", "fixture.zip").dblclick();
+    await fileRow(page, "left", "nested").dblclick();
+    const archivePath = home + sep + "fixture.zip!/nested";
+    await waitPath(page, "left", archivePath);
+    await saveShortcut(page, "left", 7);
+    await openSource(page, "left", "Collections");
+    const collection = page.locator("#left-collections");
+    await collection.getByRole("option", { name: "Fixture collection", exact: true }).dblclick();
+    await collection.getByRole("option", { name: "Nested collection", exact: true }).dblclick();
+    await collection.dispatchEvent("keydown", { key: "8", code: "Digit8", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true });
+    const collectionShortcut = page.getByRole("dialog", { name: "Folder shortcuts", exact: true });
+    await button(collectionShortcut, "Save").click();
+    await collectionShortcut.waitFor({ state: "hidden" });
+    for (const name of ["Parent folder", "Parent folder", "Back to files"]) {
+      await button(page.getByRole("region", { name: "Collections", exact: true }), name).click();
+    }
+    await openSource(page, "left", "Home");
+    await waitPath(page, "left", home);
+    let snapshot = await stored(page);
     assert.equal(snapshot[0].path, home);
     assert.equal(snapshot.filter(({ segments }) => segments?.join("/") === "nested").length, 3);
     assert.equal(snapshot.some(({ kind }) => kind === "smb"), windows);
@@ -154,8 +199,32 @@ try {
     await page.reload();
     await waitPath(page, "left", home);
     await waitPath(page, "right", downloads);
+    for (const [digit, path] of [[1, local], [2, "/nested"], [3, "/nested"], [4, "/nested"],
+      ...(windows ? [[5, smb], [6, "C:\\nested"]] : []), [7, archivePath]]) {
+      await page.locator("#right-files").focus();
+      await page.keyboard.down("ControlRight");
+      await page.keyboard.press(`Digit${digit}`);
+      await page.keyboard.up("ControlRight");
+      await waitPath(page, "right", path);
+    }
+    assert.ok((await calls(page)).some(([command, segments]) => command === "list_archive" && segments.join("/") === "nested"));
+    await page.locator("#right-files").focus();
+    await page.keyboard.down("ControlRight");
+    await page.keyboard.press("Digit8");
+    await page.keyboard.up("ControlRight");
+    const restoredCollection = page.locator("#right-collections");
+    await restoredCollection.waitFor({ state: "attached" });
+    assert.match((await restoredCollection.getAttribute("aria-label")) ?? "", /Nested collection/);
+    for (const name of ["Parent folder", "Parent folder", "Back to files"]) {
+      await button(page.getByRole("region", { name: "Collections", exact: true }), name).click();
+    }
+    const shortcuts = await page.evaluate(() => JSON.parse(localStorage.getItem("dirlume.folder-shortcuts.v1")));
+    assert.doesNotMatch(JSON.stringify(shortcuts), /SECRET|credential|\b(1234|5678|9012|4001)\b/);
+    await openSource(page, "right", "Downloads");
+    await waitPath(page, "right", downloads);
     await button(filePane(page, "right"), "Refresh folder").click();
     await waitPath(page, "right", downloads);
+    snapshot = await stored(page);
     const before = await calls(page);
     await openSource(page, "right", "Recent");
     await rightRecent.getByRole("searchbox").waitFor();

@@ -6,23 +6,24 @@ import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState,
 import { createPortal } from "react-dom";
 import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, File, Folder, Ruler,
-  Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, TriangleAlert, X,
+  Activity, GitBranch, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, TriangleAlert, X,
 } from "lucide-react";
 import { api, describeError, folderLabel, googleDriveSignInRequired, supportsFileTree, placeAddress, smbHost, windowsClient, type ComputerDrive, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
 import { entryLabel, folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, type FilePaneView, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileAppearance, type FileTypeIndex } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
-import { showShortcut, type PanelLayout } from "./preferences";
+import { bindingMatches, eventShortcut, showShortcut, type PanelLayout } from "./preferences";
 import { useTimestamps } from "./useTimestamps";
 import { viewFontStyle } from "./viewFonts";
-import { columnGroupTrack, fieldClass, FileColumns, panelColumnTracks, readColumnLayout, saveColumnLayout, type ColumnSamples } from "./FileColumns";
+import { columnGroupTrack, fieldClass, FileColumns, isSizeField, panelColumnTracks, readColumnLayout, saveColumnLayout, type ColumnSamples } from "./FileColumns";
 import { defaultPanelModes, displayPanelName, isNameField, panelColumnGroups, type PanelField, type PanelMode, type PanelModeId } from "./panelModes";
 import { usePanelMetadata } from "./usePanelMetadata";
 import { QuickSearch, useQuickSearch } from "./QuickSearch";
 import { SpaceControl } from "./SpaceControl";
 import { canAnalyze, type Metric, type SpacePlace } from "./spaceScan";
 import { useRightClickSelection } from "./useRightClickSelection";
+import { gitChangeLabel, gitPanePath, type GitPaneListing } from "./gitPane";
 
 function sizeLabel(bytes: number, incomplete?: boolean, formatter?: Intl.NumberFormat) {
   const value = formatter ? formatter.format(bytes) : formatSize(bytes);
@@ -37,6 +38,10 @@ function driveSpace(drive?: ComputerDrive): DiskSpace | null {
 
 function paneSpaceTarget(place: Place | null): { key: string; read: () => Promise<DiskSpace | null> } | null {
   if (place?.kind === "local") return { key: JSON.stringify([place.kind, place.path]), read: () => api.diskSpace(place.path) };
+  if (place?.kind === "googleDrive") return { key: JSON.stringify([place.kind, place.id]), read: async () => {
+    const { limit, usage } = await api.googleDriveQuota(place.id);
+    return limit !== null && usage !== null ? { total: limit, available: Math.max(0, limit - usage) } : null;
+  } };
   if (place?.kind === "server" && place.pairedComputer && place.segments.length) {
     const [drive] = place.segments;
     return { key: JSON.stringify([place.kind, place.id, drive]), read: async () =>
@@ -106,11 +111,14 @@ interface PaneProps {
   processView: { path?: string } | null;
   onProcesses: (visible: boolean) => void;
   processContextMenuShortcut: readonly string[];
+  fileContextMenuShortcut: readonly string[];
   onShowExecutable: (path: string) => Promise<void>;
   onProcessFeedback: (text: string, error?: boolean) => void;
   onContext: (x: number, y: number, entry?: Entry, preserveMarks?: boolean) => void;
   onAnalyze: (place: SpacePlace) => void;
   spaceDisabled: boolean;
+  gitListing?: GitPaneListing;
+  gitUnavailable?: boolean;
 }
 
 function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["rename"]>) {
@@ -155,9 +163,10 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   rightClickSelection, pane, entries: availableEntries, fileTypes, fileView, onFileView, onTreeBranch, folderSizes, onFolderSizes, locations, rename, activate, onRow,
   onRightClickMark, onQuickMatch, onOpen, fileOpenFeedback, onPath, onLocalLocation,
   onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, fontSize, onCloseResults, onRevealResult,
-  onStartDrag, dropTarget, processView, onProcesses, processContextMenuShortcut, onShowExecutable, onProcessFeedback,
+  onStartDrag, dropTarget, processView, onProcesses, processContextMenuShortcut, fileContextMenuShortcut, onShowExecutable, onProcessFeedback,
   onContext, onCancelFolderOperation, cancelFolderShortcut,
-  onPathAncestor, onOpenConnections, onAddConnection, onReconnectGoogleDrive, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
+  onPathAncestor, onOpenConnections, onAddConnection, onReconnectGoogleDrive, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled,
+  gitListing, gitUnavailable }: PaneProps) {
   const section = useRef<HTMLElement>(null);
   const path = pane.place ? placeAddress(pane.place) : "";
   const catalog = pane.place?.kind === "connections";
@@ -183,22 +192,18 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const visibility = modeVisibility[layoutMode];
   const definition = catalog ? defaultPanelModes.full : mode;
   const tree = !catalog && fileView === "tree";
-  const columnsInMode = definition.list.filter(({ field }) => isNameField(field) || visibility[fieldClass[field]] !== false);
+  const sourceColumns = definition.list.filter(({ field }) => field !== "git" || gitListing);
+  const withGit = gitListing && !sourceColumns.some(({ field }) => field === "git") ? sourceColumns.flatMap((column) =>
+    isNameField(column.field) ? [column, { field: "git" as const, width: "0" }] : [column]) : sourceColumns;
+  const columnsInMode = withGit.filter(({ field }) => isNameField(field) || visibility[fieldClass[field]] !== false);
   const modeGroups = panelColumnGroups(columnsInMode);
   const groups = (tree ? modeGroups.slice(0, 1) : modeGroups).map((group) =>
     (folderSizes.active || folderSizes.branchActive) && !group.some(({ field }) => field === "size" || field === "bytes")
       ? [...group, { field: "size" as const, width: "0" }] : group);
   const columns = groups.flat();
-  const hasReadyBackgroundSize = useMemo(() => {
-    for (const size of pane.backgroundSizes?.values() ?? []) {
-      if (!size.pending && !size.unavailable) return true;
-    }
-    return false;
-  }, [pane.backgroundSizes]);
-  const fitMeasuredFolders = !pane.search && (pane.sizes.size > 0 || hasReadyBackgroundSize);
   const tlsProfiles = netbox && pane.entries.some(({ connection }) =>
     connection?.kind === "ftp" && connection.encryption && connection.encryption !== "plain");
-  const tracks = driveCatalog ? "minmax(0, 2fr) minmax(0, 3fr) minmax(0, 2fr)" : netbox ? `minmax(0, 2fr) minmax(0, ${tlsProfiles ? 15 : 7}ch) minmax(0, 3fr)` : panelColumnTracks(columns, fitMeasuredFolders);
+  const tracks = driveCatalog ? "minmax(0, 2fr) minmax(0, 3fr) minmax(0, 2fr)" : netbox ? `minmax(0, 2fr) minmax(0, ${tlsProfiles ? 15 : 7}ch) minmax(0, 3fr)` : panelColumnTracks(columns);
   const rowProbe = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
   const selected = paneCursorIndex(pane, entries);
@@ -226,37 +231,14 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     return { group, first, last, indices };
   });
   const indices = renderedGroups.flatMap(({ indices }) => indices);
-  const statusColumns = catalog ? [] : mode.status;
+  const statusColumns = catalog ? [] : mode.status.filter(({ field }) => field !== "git");
   const displayedColumns = [...columns, ...statusColumns];
   const displayedFields = displayedColumns.map(({ field }) => field);
   const autoNameCount = columns.filter(({ field, width }) => width === "0" && isNameField(field)).length;
   const automaticFields = [...new Set(columns.filter(({ field, width }) =>
-    width === "0" && (!isNameField(field) || autoNameCount > 1)).map(({ field }) => field))].join(",");
-  const sampleSize = fitMeasuredFolders && columns.some(({ field }) => field === "size");
-  const sampleBytes = fitMeasuredFolders && columns.some(({ field }) => field === "bytes");
+    isSizeField(field) || width === "0" && (!isNameField(field) || autoNameCount > 1)).map(({ field }) => field))].join(",");
   const language = locale();
   const bytesFormat = useMemo(() => new Intl.NumberFormat(language), [language]);
-  const measuredSizes = useMemo(() => {
-    const size = new Map<string, string>();
-    const bytes = new Map<string, string>();
-    if (sampleSize || sampleBytes) {
-      const measurements = pane.backgroundSizes ? new Map([...pane.sizes, ...pane.backgroundSizes]) : pane.sizes;
-      for (const [name, result] of measurements) {
-        const background = pane.backgroundSizes?.get(name);
-        if (background?.unavailable || (background?.pending && background.bytes === 0)) continue;
-        // The pane uses tabular figures. One sample per digit pattern keeps large batches compact.
-        if (sampleSize) {
-          const sample = sizeLabel(result.bytes, result.incomplete);
-          size.set(sample.replace(/\p{Decimal_Number}/gu, "0"), sample);
-        }
-        if (sampleBytes) {
-          const sample = sizeLabel(result.bytes, result.incomplete, bytesFormat);
-          bytes.set(sample.replace(/\p{Decimal_Number}/gu, "0"), sample);
-        }
-      }
-    }
-    return { size: [...size.values()], bytes: [...bytes.values()] };
-  }, [sampleSize, sampleBytes, pane.backgroundSizes, pane.sizes, bytesFormat]);
   const visibleTimestamps = processView ? [] : indices.map((index) => entries[index].modified);
   const dateLabel = useTimestamps(displayedFields.includes("date") ? visibleTimestamps : [], "date");
   const timeLabel = useTimestamps(displayedFields.includes("time") ? visibleTimestamps : [], "time");
@@ -405,6 +387,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
       }));
     }
     switch (field) {
+      case "git": return "";
       case "size":
       case "bytes": {
         const background = pane.backgroundSizes?.get(entry.name);
@@ -432,22 +415,21 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   }
 
   const widthSamples = useMemo<ColumnSamples>(() => {
-    const result: ColumnSamples = { ...measuredSizes };
+    const result: ColumnSamples = {};
     if (processView || netbox || !automaticFields) return result;
     for (const field of automaticFields.split(",") as PanelField[]) {
       const samples = new Map<string, string>();
       const tabular = field !== "owner" && !isNameField(field);
       const add = (label: string) => samples.set(tabular ? label.replace(/\p{Decimal_Number}/gu, "0") : label, label);
-      for (const sample of result[field] ?? []) add(sample);
       for (const entry of entries) add(itemValue(entry, field, true));
       result[field] = [...samples.values()];
     }
     return result;
-  }, [automaticFields, entries, measuredSizes, processView, netbox, metadata, pane, language, dateLabel, timeLabel, definition, listOwner, listLinks]);
+  }, [automaticFields, entries, processView, netbox, metadata, pane, language, dateLabel, timeLabel, definition, listOwner, listLinks]);
   const statusSamples: ColumnSamples = {};
   if (!processView && !netbox && current && current.name !== "..") {
     for (const { field, width } of statusColumns) {
-      if (width === "0") statusSamples[field] = [itemValue(current, field)];
+      if (width === "0" || isSizeField(field)) statusSamples[field] = [itemValue(current, field)];
     }
   }
 
@@ -557,6 +539,12 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         <AddressField key={pane.addressRevision} side={side} place={addressPlace ?? pane.place} trail={pane.addressTrail} showHidden={showHidden}
           onNavigate={onPath} onNavigateAncestor={onPathAncestor} onOpenConnections={onOpenConnections}
           onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />
+        {!processView && (gitListing || gitUnavailable) && <div className="pane-git-branch" data-help-topic="gitView">
+          <GitBranch aria-hidden="true" />{gitListing ? <span dir="auto" data-tooltip={gitListing.status.root}>
+            {gitListing.status.headRef?.replace(/^refs\/heads\//, "") ??
+              t("Detached HEAD {0}", gitListing.status.head?.slice(0, 7) ?? "")}
+            {!gitListing.status.head && <> · {t("No commits yet")}</>}</span> : <span>{t("Git status unavailable")}</span>}
+        </div>}
         {sourceMenu}
       </div>
       {processView ? <ProcessBrowser side={side} lockingPath={processView.path} onClose={() => onProcesses(false)}
@@ -586,7 +574,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           <div className="file-column"><span className="file-column-label">{t(driveCatalog ? "Account email" : "Protocol")}</span></div>
           <div className="file-column"><span className="file-column-label">{t(driveCatalog ? "Status" : "Host")}</span></div>
         </div>
-      </div> : <FileColumns container={columnHeader} groups={groups} columns={definition.list} tracks={tracks} samples={widthSamples} statusSamples={statusSamples}
+      </div> : <FileColumns container={columnHeader} groups={groups} columns={withGit} tracks={tracks} samples={widthSamples} statusSamples={statusSamples}
         visibility={visibility} sort={sortAvailable ? pane.sort : { ...pane.sort, column: "name", asc: true }} onSort={onSort}
         onVisibility={(column, visible) => {
           const next = { ...visibility, [column]: visible };
@@ -601,9 +589,20 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
       <div id={`${side}-files`} ref={list} className={virtual ? "file-list virtual-file-list" : "file-list"} data-paged={paged || undefined}
         role={tree ? "tree" : "listbox"} data-help-return data-file-view={fileView} aria-label={t(side === "left" ? "left files" : "right files")}
         {...rightClick.events}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget || event.key !== "ContextMenu" &&
+              !bindingMatches(fileContextMenuShortcut, eventShortcut(event))) return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.repeat) return;
+          const entry = entries[selected];
+          const target = event.currentTarget.querySelector<HTMLElement>(".file-row[data-current=true]") ?? event.currentTarget;
+          const bounds = target.getBoundingClientRect();
+          onContext(bounds.left + 8, bounds.bottom, entry?.name === ".." ? undefined : entry);
+        }}
         onContextMenu={(event) => {
           event.preventDefault();
-          if (!rightClick.suppressContextMenu(event)) onContext(event.clientX, event.clientY);
+          if (event.button >= 0 && !rightClick.suppressContextMenu(event)) onContext(event.clientX, event.clientY);
         }}
         onWheel={(event) => {
           if (!paged || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey ||
@@ -634,6 +633,10 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
               profile?.encryption === "implicitTls" ? t("FTPS (implicit)") : "FTP";
             const icon = icons.get(byName.get(entry.name) ?? "");
             const measuring = !search && entry.directory && !entry.link && pane.measuring.includes(entry.name);
+            const gitPath = gitListing && entry.name !== ".." ? gitPanePath(gitListing, entry) : undefined;
+            const gitChanges = gitPath !== undefined ? gitListing?.files.get(gitPath) : undefined;
+            const gitFolder = !!(entry.directory && gitPath !== undefined && gitListing?.folders.has(gitPath));
+            const gitLabel = gitFolder ? t("Changes in this folder") : gitChanges?.map(gitChangeLabel).join(" · ");
             const marked = markedSet.has(entry.name);
             const appearance = fileAppearance(entry.googleDrive ? { ...entry, name: entry.googleDrive.name } : entry, fileTypes);
             const branchError = entry.tree?.error && (entry.tree.stale
@@ -645,7 +648,8 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 aria-posinset={virtual && !tree ? index + 1 : undefined}
                 aria-level={entry.tree?.segments.length}
                 aria-expanded={entry.tree && entry.directory && !entry.link ? entry.tree.expanded : undefined}
-                aria-label={drive ? [drive.label, drive.email, signIn].join(" ") : profile ? [entry.name, protocol, profile.host].join(" ") : group.map(({ field }) => itemValue(entry, field, true)).join(" ")}
+                aria-label={drive ? [drive.label, drive.email, signIn].join(" ") : profile ? [entry.name, protocol, profile.host].join(" ") :
+                  group.map(({ field }) => field === "git" ? gitLabel ?? "" : itemValue(entry, field, true)).filter(Boolean).join(" ")}
                 aria-description={branchError}
                 data-file-color={appearance.tone}
                 style={appearance.color || appearance.family ? { "--entry-color": appearance.color,
@@ -691,6 +695,16 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                       icon ? <img className="native-file-icon" alt="" src={`data:image/png;base64,${icon}`} /> : <File />}
                     {renderName(entry, field, true)}
                     {entry.link && <Link2 className="link-icon" aria-label={t("Link")} />}
+                  </span> : field === "git" ? <span key={slot} className="file-git-status">
+                    {gitFolder ? <span data-tooltip={gitLabel} aria-label={gitLabel}>Δ</span> : gitChanges && <Button type="button"
+                      tabIndex={-1} aria-label={gitLabel} tooltip={gitLabel} onPointerDown={(event) => event.stopPropagation()}
+                      onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => {
+                        event.stopPropagation();
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        onContext(rect.left, rect.bottom, entry);
+                      }}>
+                      {gitChanges.map(({ group, status }) => <span key={group} data-git-group={group}>{group === "staged" ? "S" : group === "unstaged" ? "W" : ""}{status}</span>)}
+                    </Button>}
                   </span> :
                   <span key={slot} className={`file-metadata file-${fieldClass[field] === "modified" ? "date" : fieldClass[field]}`}>
                     {(field === "bytes" || field === "size") && measuring ?
@@ -750,7 +764,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
               <Button type="button" className="icon-button" aria-label={t("Cancel folder size calculation")}
                 shortcut={cancelKey} onClick={onCancelFolderOperation}><X aria-hidden="true" /></Button>
             </div> : current && current.name !== ".." && statusColumns.length > 0 &&
-              <div className="pane-details" style={{ gridTemplateColumns: panelColumnTracks(statusColumns, false, true) }}
+              <div className="pane-details" style={{ gridTemplateColumns: panelColumnTracks(statusColumns, true) }}
                 data-tooltip={statusColumns.map(({ field }) => itemValue(current, field)).filter(Boolean).join(" · ")}>
                 {statusColumns.map(({ field }, index) => <span key={index} className={`pane-detail pane-detail-${fieldClass[field]}`}
                   data-tooltip={itemValue(current, field)}>

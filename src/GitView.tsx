@@ -1,19 +1,23 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Bug, Check, Copy, Eye, FileClock, FolderGit2, GitBranch, GitBranchPlus, GitCommitHorizontal, GitCompareArrows,
   GitFork, GitMerge as MergeIcon, History as HistoryIcon, Network, Pencil, RotateCw, Search, Settings, Trash2, Undo2, Upload, X } from "lucide-react";
-import { api, type GitBranch as Branch, type GitBranchAction, type GitBranchRequest, type GitCommit, type GitDetails, type GitHistory, type GitMergeState, type GitRepository, type NamedFile } from "./api";
+import { api, type GitBranch as Branch, type GitBranchAction, type GitBranchRequest, type GitCommit, type GitDetails, type GitFileLaunch, type GitHistory, type GitMergeState, type GitRepository, type NamedFile } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { GitActionButtons, GitActionMenuProvider, useGitMenu, type GitAction } from "./GitActions";
+import { GitBlameViewer } from "./GitBlameViewer";
 import { GitChanges } from "./GitChanges";
 import { GitCommitGraph } from "./GitCommitGraph";
+import { GitFileHistory } from "./GitFileHistory";
 import { writeError } from "./gitWriteError";
 import { GitHistoryTools, type HistoryAction } from "./GitHistoryTools";
 import { GitMerge, gitOperationStatus } from "./GitMerge";
 import { GitRepositoryTools } from "./GitRepositoryTools";
 import { GitRepositorySetup } from "./GitRepositorySetup";
-import { GitRevisionComparison, GitRevisionPatch } from "./GitRevisionComparison";
+import { GitRevisionComparison, GitRevisionChange } from "./GitRevisionComparison";
 import { GitSyncTools } from "./GitSyncTools";
+import { GitWorkingComparison } from "./GitWorkingComparison";
+import type { ComparisonShortcuts } from "./TextTools";
 import { t } from "./i18n";
 import { useTimestamps } from "./useTimestamps";
 import { opposite, type Side } from "./panes";
@@ -46,13 +50,14 @@ const branchHints = {
 
 type HistoricalPath = { path: string; tip: string; mode: "history" | "blame" };
 type InspectCommit = {
+  shortcuts: ComparisonShortcuts;
   actions: (commit: GitCommit, showDetails?: () => void) => GitAction[];
   openPath: (target: HistoricalPath) => void;
   copy: (value: string, message: string) => void;
 };
 
-function ChangeDetails({ root, commit, onTarget, inspect }: {
-  root: string; commit: GitCommit; onTarget: (hash: string) => void; inspect: InspectCommit;
+function ChangeDetails({ root, commit, onTarget, inspect, highlight }: {
+  root: string; commit: GitCommit; onTarget?: (hash: string) => void; inspect: InspectCommit; highlight?: string;
 }) {
   const menu = useGitMenu();
   const [details, setDetails] = useState<GitDetails | null>(null);
@@ -64,7 +69,7 @@ function ChangeDetails({ root, commit, onTarget, inspect }: {
       void api.copyText(commit.hash).then(() => setCopyStatus(t("Commit hash copied.")),
         () => setCopyStatus(t("Could not copy the commit hash.")));
     } },
-    { label: "Use in history actions", icon: HistoryIcon, run: () => onTarget(commit.hash) },
+    ...(onTarget ? [{ label: "Use in history actions", icon: HistoryIcon, run: () => onTarget(commit.hash) }] : []),
   ];
   useEffect(() => {
     let canceled = false;
@@ -86,7 +91,7 @@ function ChangeDetails({ root, commit, onTarget, inspect }: {
           const { status, path, previousPath } = change;
           const historicalTip = status === "D" ? details.firstParent : commit.hash;
           const historicalPath = status === "D" ? previousPath ?? path : path;
-          return <li key={path} tabIndex={0} {...menu([
+          return <li key={path} tabIndex={0} data-highlight={path === highlight || previousPath === highlight || undefined} {...menu([
             { label: "Show change", icon: GitCompareArrows, run: () => setDiff(change) },
             { label: "File history", icon: FileClock, run: () => inspect.openPath({ path, tip: commit.hash, mode: "history" }) },
             { label: "Show blame", icon: Search, disabled: !historicalTip,
@@ -101,15 +106,15 @@ function ChangeDetails({ root, commit, onTarget, inspect }: {
       {diff && <Dialog title={t("Change preview")} helpTopic="gitView" wide onClose={() => setDiff(undefined)}>
         <div className="dialog-body">
           <p>{diff.previousPath ? diff.previousPath + " → " + diff.path : diff.path}</p>
-          <GitRevisionPatch root={root} base={details.firstParent ?? null} target={commit.hash} change={diff} />
+          <GitRevisionChange root={root} base={details.firstParent ?? null} target={commit.hash} change={diff} shortcuts={inspect.shortcuts} />
         </div>
       </Dialog>}
     </> : <p role="status">{t("Loading commit details…")}</p>}
   </section>;
 }
 
-function History({ root, tip, file, onTarget, inspect }: {
-  root: string; tip?: string; file?: string; onTarget: (hash: string) => void; inspect: InspectCommit;
+function History({ root, tip, onTarget, inspect }: {
+  root: string; tip?: string; onTarget: (hash: string) => void; inspect: InspectCommit;
 }) {
   const menu = useGitMenu();
   const [result, setResult] = useState<GitHistory>({ commits: [], nextOffset: tip ? 0 : null });
@@ -119,8 +124,7 @@ function History({ root, tip, file, onTarget, inspect }: {
   useEffect(() => {
     if (!tip || !request) return;
     let canceled = false;
-    const query = file ? api.gitFileHistory(root, tip, file, request.offset) : api.gitHistory(root, tip, request.offset);
-    void query.then((page) => {
+    void api.gitHistory(root, tip, request.offset).then((page) => {
       if (!canceled) setResult((current) => ({
         commits: request.offset === 0 ? page.commits : [...current.commits, ...page.commits], nextOffset: page.nextOffset,
       }));
@@ -130,7 +134,7 @@ function History({ root, tip, file, onTarget, inspect }: {
       if (!canceled) setRequest(null);
     });
     return () => { canceled = true; };
-  }, [root, tip, file, request]);
+  }, [root, tip, request]);
   const formatDate = useTimestamps(result.commits.map(({ date }) => Math.floor(Date.parse(date) / 1000)));
   return <div className="git-history git-scroll">
     {result.commits.map((commit) => <div className="git-commit" key={commit.hash}>
@@ -154,48 +158,6 @@ function History({ root, tip, file, onTarget, inspect }: {
   </div>;
 }
 
-function Blame({ root, tip, path }: { root: string; tip: string; path: string }) {
-  const [result, setResult] = useState<string | null>(null);
-  const [error, setError] = useState(false);
-  useEffect(() => {
-    let canceled = false;
-    void api.gitFileBlame(root, tip, path).then((result) => { if (!canceled) setResult(result); },
-      () => { if (!canceled) setError(true); });
-    return () => { canceled = true; };
-  }, [root, tip, path]);
-  if (error) return <p role="alert">{t("Could not read blame for this path at the selected revision.")}</p>;
-  if (result === null) return <p role="status">{t("Reading change…")}</p>;
-  return result
-    ? <pre className="git-patch" tabIndex={0} aria-label={t("Blame")}>{result}</pre>
-    : <p>{t("This file has no lines.")}</p>;
-}
-
-function FileRevision({ root, tip, onTarget, initial, inspect }: {
-  root: string; tip: string; onTarget: (hash: string) => void; initial?: HistoricalPath; inspect: InspectCommit;
-}) {
-  const menu = useGitMenu();
-  const [path, setPath] = useState(initial?.path ?? "");
-  const [opened, setOpened] = useState<{ path: string; mode: "history" | "blame" } | undefined>(initial);
-  const actions: GitAction[] = [
-    { label: "Show history", icon: FileClock, disabled: !path, submit: true, run: () => setOpened({ path, mode: "history" }) },
-    { label: "Show blame", icon: Search, disabled: !path, run: () => setOpened({ path, mode: "blame" }) },
-  ];
-  return <div className="git-scroll git-revision-comparison" tabIndex={-1} {...menu(actions)}>
-    <form onSubmit={(event) => {
-      event.preventDefault();
-      if (path) setOpened({ path, mode: "history" });
-    }}>
-      <label className="field">{t("Path relative to the repository")}
-        <input value={path} onChange={(event) => setPath(event.target.value)} required spellCheck={false} autoComplete="off" />
-      </label>
-      <GitActionButtons actions={actions} />
-    </form>
-    {opened && (opened.mode === "history"
-      ? <History key={opened.path} root={root} tip={tip} file={opened.path} onTarget={onTarget} inspect={inspect} />
-      : <Blame key={opened.path} root={root} tip={tip} path={opened.path} />)}
-  </div>;
-}
-
 export default function GitView(props: GitViewProps & { menuShortcut: readonly string[] }) {
   return <GitActionMenuProvider shortcut={props.menuShortcut} revision={props.refresh}><GitViewContent {...props} /></GitActionMenuProvider>;
 }
@@ -210,19 +172,25 @@ type GitViewProps = {
   onOpenWorktree: (path: string) => void;
   onTerminal: (path: string) => void;
   canEdit: (file: NamedFile) => boolean;
+  file?: GitFileLaunch;
+  compareShortcuts: ComparisonShortcuts;
 };
 
-function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpenWorktree, onTerminal, canEdit }: GitViewProps) {
+function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpenWorktree, onTerminal, canEdit, file, compareShortcuts }: GitViewProps) {
   const menu = useGitMenu();
   const [repository, setRepository] = useState<GitRepository | null>(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState("");
-  const [changes, setChanges] = useState(false);
-  const [historyMode, setHistoryMode] = useState<"history" | "graph" | "file" | "compare" | "merge" | "tools" | "repository" | "sync">("history");
+  const [changes, setChanges] = useState(file?.action === "diff");
+  const [historyMode, setHistoryMode] = useState<"history" | "graph" | "file" | "compare" | "merge" | "tools" | "repository" | "sync">
+    (file?.action === "history" ? "file" : "history");
   const [historyTarget, setHistoryTarget] = useState<{ revision: string; action?: HistoryAction }>();
   const [compareTarget, setCompareTarget] = useState<string>();
-  const [fileTarget, setFileTarget] = useState<HistoricalPath>();
+  const [fileTarget, setFileTarget] = useState<HistoricalPath | undefined>(file?.action === "history" ?
+    { path: file.path, tip: file.head, mode: "history" } : undefined);
+  const [blameTarget, setBlameTarget] = useState<{ path: string; tip: string } | undefined>(file?.action === "blame" ?
+    { path: file.path, tip: file.head } : undefined);
   const [bisectTarget, setBisectTarget] = useState<{ field: "good" | "bad"; revision: string }>();
   const [syncTarget, setSyncTarget] = useState<{ reference?: string; action: "push" | "upstream" | "delete" }>();
   const [pull, setPull] = useState<{ method: "merge" | "rebase"; upstream: string }>();
@@ -237,7 +205,8 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
   const filterField = useRef<HTMLInputElement>(null);
   const branches = useRef<HTMLDivElement>(null);
   const knownRepository = useRef<{ path: string; root: string }>(null);
-  useLayoutEffect(() => { if (!changes) filterField.current?.focus(); }, [changes]);
+  const fileHistoryOpen = historyMode === "file";
+  useLayoutEffect(() => { if (!changes && !fileHistoryOpen) filterField.current?.focus(); }, [changes, fileHistoryOpen]);
   useEffect(() => {
     let canceled = false;
     setError("");
@@ -289,6 +258,7 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
     setHistoryMode("sync");
   }
   const inspect: InspectCommit = {
+    shortcuts: { ...compareShortcuts, swapShortcut: [] },
     actions: (commit, showDetails) => [
       ...(showDetails ? [{ label: "Show commit details", icon: Eye, run: showDetails }] : []),
       { label: "Copy commit hash", icon: Copy, run: () => copy(commit.hash, "Commit hash copied.") },
@@ -304,7 +274,10 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
         .map(([action, label]) => ({ label, icon: Undo2, destructive: true, disabled: !!mergeState,
           run: () => useHistoryTarget(commit.hash, action) })),
     ],
-    openPath: (target) => { setFileTarget(target); setHistoryMode("file"); },
+    openPath: (target) => {
+      if (target.mode === "blame") setBlameTarget({ path: target.path, tip: target.tip });
+      else { setBlameTarget(undefined); setFileTarget(target); setHistoryMode("file"); }
+    },
     copy,
   };
   const allBranches: Branch[] = repository ? [...repository.branches] : [];
@@ -439,17 +412,46 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
     </div>
     <GitActionButtons actions={[refreshAction, closeAction]} />
   </header>;
+  const fileDiff = file?.action === "diff" ? file.path : undefined;
+  const fileDiffActions = [refreshAction, closeAction];
+  const fileDiffHeader = <header className="pane-heading"><span className="pane-title">{t("Show diff")}</span>
+    <GitActionButtons actions={fileDiffActions} /></header>;
   const location = <div className="git-repository">
     {repository && <strong>{repository.name}</strong>}
     <span title={repository?.root ?? path}>{repository?.root ?? path}</span>
   </div>;
-  if (changes && repository && !error) return <GitChanges key={repository.root} root={repository.root}
-    side={side} refresh={refresh} selected={selectedChange} onSelect={setSelectedChange} header={header} paneActions={paneActions}
+  const historyHeader = <header className="pane-heading git-history-heading" {...menu([refreshAction, ...historyActions])}>
+    <span className="pane-title"><GitCommitHorizontal aria-hidden="true" />{t("Commit history")}</span>
+    {repository && <span className="git-ref">{branch?.name ?? allBranches.find(({ reference }) => reference === checkedOut)?.name}</span>}
+    <div className="git-history-actions"><GitActionButtons actions={historyActions} /></div>
+  </header>;
+  if (changes && repository && !error) return <GitChanges key={repository.root} root={repository.root} pathScope={fileDiff}
+    side={side} refresh={refresh} selected={selectedChange} onSelect={setSelectedChange} header={fileDiff ? fileDiffHeader : header}
+    paneActions={fileDiff ? fileDiffActions : paneActions}
     repository={location} onOpen={onOpen} canEdit={canEdit} onRefresh={onRefresh}
+    compareShortcuts={{ ...compareShortcuts, swapShortcut: [] }}
     draft={draft?.root === repository.root ? draft.message : ""}
     onDraft={(message) => setDraft({ root: repository.root, message })} />;
+  const fileTip = fileTarget?.tip ?? tip;
+  const blameViewer = repository && blameTarget && <GitBlameViewer key={JSON.stringify([repository.root, blameTarget])}
+    root={repository.root} revision={blameTarget.tip} path={blameTarget.path}
+    onClose={file?.action === "blame" && historyMode === "history" ? onClose : () => setBlameTarget(undefined)}
+    renderDetails={(line) => <ChangeDetails key={line.hash} root={repository.root} highlight={line.path}
+      commit={{ hash: line.hash, shortHash: line.hash.slice(0, 12), author: line.author, subject: "", date: "" }}
+      inspect={{ ...inspect, actions: (commit) => inspect.actions(commit).filter(({ label }) => label === "Copy commit hash") }}
+    />} />;
+  if (fileHistoryOpen && repository && fileTip) return <>
+    <GitFileHistory key={JSON.stringify([repository.root, fileTarget])}
+      repository={repository} tip={fileTip} side={side} initial={fileTarget} refresh={refresh} historyHeader={historyHeader}
+      previewControls={<GitActionButtons actions={[refreshAction, closeAction]} />} commitActions={inspect.actions}
+      onBlame={(path, tip) => setBlameTarget({ path, tip })} compareShortcuts={{ ...compareShortcuts, swapShortcut: [] }} />
+    {blameViewer}
+  </>;
 
   return <>
+    {blameViewer}
+    {repository && file?.action === "compare" && <GitWorkingComparison repository={repository} path={file.path} head={file.head}
+      onClose={onClose} shortcuts={compareShortcuts} />}
     <section className={"pane git-pane git-pane-" + side} aria-label={t(changes ? "Changes" : "Branches")} data-help-topic="gitView" data-pane-side={side}
       tabIndex={-1} {...menu(paneActions)}>
       {header}
@@ -478,13 +480,7 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
     </section>
     <section className={"pane git-pane git-pane-" + opposite(side)} aria-label={t("Commit history")} data-help-topic="gitView" data-pane-side={opposite(side)}
       tabIndex={-1} {...menu([refreshAction, ...historyActions])}>
-      <header className="pane-heading git-history-heading">
-        <span className="pane-title"><GitCommitHorizontal aria-hidden="true" />{t("Commit history")}</span>
-        {repository && <span className="git-ref">{branch?.name ?? allBranches.find(({ reference }) => reference === checkedOut)?.name}</span>}
-        <div className="git-history-actions">
-          <GitActionButtons actions={historyActions} />
-        </div>
-      </header>
+      {historyHeader}
       {repository && !changes && (historyMode === "merge"
         ? <GitMerge key={repository.root} root={repository.root} source={pull?.method === "merge" ? pull.upstream :
           branch && selected !== checkedOut ? branch.reference : ""}
@@ -493,7 +489,7 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
         ? <GitHistoryTools key={JSON.stringify([repository.root, pull?.upstream, historyTarget])} repository={repository}
           initialTarget={historyTarget?.revision ?? tip}
           initialRef={pull?.method === "rebase" ? pull.upstream : historyTarget ? undefined : branch?.reference}
-          initialAction={pull?.method === "rebase" ? "rebase" : historyTarget?.action} onRefresh={onRefresh} />
+          initialAction={pull?.method === "rebase" ? "rebase" : historyTarget?.action} onRefresh={onRefresh} shortcuts={inspect.shortcuts} />
         : historyMode === "repository"
         ? <GitRepositoryTools key={JSON.stringify([repository.root, bisectTarget])} repository={repository} refresh={refresh}
           bisectTarget={bisectTarget} onRefresh={onRefresh} onOpen={onOpenWorktree} onTerminal={onTerminal} />
@@ -504,7 +500,7 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
             setHistoryMode(method === "merge" ? "merge" : "tools"); }} />
         : historyMode === "compare"
         ? <GitRevisionComparison key={JSON.stringify([repository.root, compareTarget ?? selected, refresh])}
-          repository={repository} target={compareTarget ?? tip} commitActions={inspect.actions} onInspectPath={inspect.openPath}
+          repository={repository} target={compareTarget ?? tip} commitActions={inspect.actions} onInspectPath={inspect.openPath} shortcuts={inspect.shortcuts}
           onCopyPath={(path) => copy(path, "Path copied to the clipboard.")}
           renderDetails={(commit) => <ChangeDetails root={repository.root} commit={commit} onTarget={useHistoryTarget} inspect={inspect} />} />
         : historyMode === "graph" && tip
@@ -512,9 +508,6 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
             repository={repository} tip={tip} branch={branch} commitActions={inspect.actions}
             renderDetails={(commit) => <ChangeDetails root={repository.root} commit={commit}
               onTarget={useHistoryTarget} inspect={inspect} />} />
-          : historyMode === "file" && (fileTarget || tip)
-            ? <FileRevision key={JSON.stringify([fileTarget, tip, refresh])} root={repository.root}
-              tip={fileTarget?.tip ?? tip!} initial={fileTarget} onTarget={useHistoryTarget} inspect={inspect} />
           : <History key={selected + ":" + (tip ?? "") + ":" + refresh} root={repository.root}
             tip={tip} onTarget={useHistoryTarget} inspect={inspect} />)}
     </section>

@@ -13,7 +13,7 @@ import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHist
 import { Fragment, lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import {
   ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Coffee, Copy, Eye, EyeOff, FileDiff,
-  FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, History, Moon, Pencil, Plug, Redo2, RefreshCw,
+  FileClock, FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, GitCompareArrows, History, Moon, Pencil, Plug, Redo2, RefreshCw,
   ScanEye, Search, Settings2, ShieldAlert, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2, Undo2, type LucideIcon,
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
@@ -24,6 +24,9 @@ import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, kswitcherPath, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPlace, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { googleDriveSignInRequired, smbLocation, uncParts, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type GoogleDrivePlace, type SavedConnection, type SshHostVerification } from "./api";
 import { isLanGroupPlace, isWritableServerPlace, supportsFileTree, type TreePlace, type WritableServerPlace } from "./api";
+import type { GitFileContext, GitFileLaunch } from "./api";
+import { GitPaneInspection, type GitPaneTarget } from "./GitPaneInspection";
+import { gitPanePath, useGitPane, type GitPaneAction } from "./gitPane";
 import { canAnalyze, scanSpace, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
 import { useSudoFolderScan } from "./useSudoFolderScan";
 import type { SpaceAnalyzerHandle, SpaceNavigation } from "./SpaceAnalyzer";
@@ -44,10 +47,11 @@ import { VerifyHostDialog } from "./SshDialog";
 import { SmbDialog } from "./SmbDialog";
 import { SudoDialog } from "./SudoDialog";
 import { FileContextMenu } from "./FileContextMenu";
+import { canCreateIn, canRenameItem, fileSourceActions } from "./fileSourceActions";
 import { FolderShortcutsDialog, type FolderShortcutScreen } from "./FolderShortcutsDialog";
 import { FileBookmarksDialog } from "./FileBookmarksDialog";
 import { bookmarkFile, fileBookmarkKey, readFileBookmarks, saveFileBookmarks, type BookmarkJump, type FileBookmark } from "./fileBookmarks";
-import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
+import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, shortcutFromRecent, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
 import type { HelpTopic } from "./helpTopics";
 import { TerminalShortcutHint } from "./TerminalShortcutHint";
 import { FileOpenFeedback, FileOpensTerminal, useFileOpens } from "./FileOpens";
@@ -59,7 +63,7 @@ import { PaneSources, type PaneSource } from "./PaneSources";
 import { RecentLocationsPane } from "./RecentLocationsPane";
 import { CollectionsPane } from "./CollectionsPane";
 import {
-  addCollectionReferences, collectionContents, collectionReference, collectionReferenceFromRecent, collectionReferencePath, collectionTrail,
+  addCollectionReferences, collectionContents, collectionReference, collectionReferenceFromRecent, collectionReferencePath, collectionTrail, copyCollectionEntries,
   editCollectionEntries, persistCollections, readCollections, resolveCollectionReference,
   type CollectionEntry, type CollectionFolder, type CollectionReference,
 } from "./collections";
@@ -72,7 +76,7 @@ import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } fr
 import { findFiles, SearchDialog } from "./SearchDialog";
 import { ElevationButton, ElevationContext, LockDialog } from "./ProcessTools";
 import { DeletionDialog } from "./DeletionDialog";
-import { DiskInformation } from "./DiskInformation";
+import { DiskInformation, type DiskInformationTarget } from "./DiskInformation";
 import type { Deletion } from "./api";
 import { Settings } from "./Settings";
 import { SortCriteriaDialog, SortMenu } from "./FileSortMenu";
@@ -184,6 +188,7 @@ type Modal =
   | { kind: "removeConnection"; side: Side; profile: SavedConnection }
   | { kind: "verifyConnection"; side: Side; profile: SavedConnectionTarget; verification: SshHostVerification; options: ConnectionOpenOptions }
   | { kind: "compare"; left: NamedFile; right: NamedFile }
+  | { kind: "gitPane"; side: Side; target: GitPaneTarget }
   | { kind: "transfer"; side: Side; transfer: Transfer; temporary?: Resource[] }
   | { kind: "fileHistory"; direction?: "undo" | "redo" }
   | { kind: "userMenu"; side: Side; context: MenuContext }
@@ -191,7 +196,7 @@ type Modal =
   | { kind: "search"; side: Side; place: FileLocation }
   | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" | "archive" | "kswitcher" | "ftp" | "ssh" }> | WritableServerPlace | GoogleDrivePlace }
   | { kind: "createArchive"; side: Side; directory: string; names: string[] }
-  | { kind: "archivePassword"; side: Side; path: string }
+  | { kind: "archivePassword"; side: Side; path: string; segments?: string[] }
   | { kind: "sudoBrowse"; side: Side; target: DeniedSshListing }
   | { kind: "attributes"; item: NonNullable<ReturnType<typeof paneItem>> }
   | { kind: "folderShortcuts"; side: Side; screen: FolderShortcutScreen }
@@ -320,7 +325,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
     return panes;
   });
-  const [diskPanes, setDiskPanes] = useState<Record<Side, string | null>>({ left: null, right: null });
+  const [diskPanes, setDiskPanes] = useState<Record<Side, DiskInformationTarget | null>>({ left: null, right: null });
   const analysisHandles = useRef<Record<Side, SpaceAnalyzerHandle | null>>({ left: null, right: null });
   const nextAnalysis = useRef(administratorWorkspace?.otherAnalyzer ? 1 : 0);
   const treeNavigation = useRef<Record<Side, number>>({ left: 0, right: 0 });
@@ -329,13 +334,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const [folderSizesEnabled, setFolderSizesEnabled] = useState({ left: false, right: false });
   const folderScanSudo = useSudoFolderScan();
   const treeBrowseSudo = useSudoFolderScan("browse");
-  const [gitView, setGitView] = useState<{ side: Side; source: Side; path: string; terminal?: { path: string; request: number } } | null>(null);
+  const [gitView, setGitView] = useState<{ side: Side; source: Side; path: string; file?: GitFileLaunch; terminal?: { path: string; request: number } } | null>(null);
   const [gitRefresh, setGitRefresh] = useState(0);
   const [swappedPanes, setSwappedPanes] = useState(false);
   const [environmentPanels, setEnvironmentPanels] = useState<Record<Side, EnvironmentMode | null>>({ left: null, right: null });
   const [environmentRevision, setEnvironmentRevision] = useState(0);
   const [recentPanes, setRecentPanes] = useState({ left: false, right: false });
   const [recentLocations, setRecentLocations] = useState(readRecentLocations);
+  const recentSelection = useRef<Partial<Record<Side, RecentLocation>>>({});
   const [collectionState, setCollectionState] = useState(() => {
     try { return { items: readCollections(), error: "" }; }
     catch (failure) { return { items: [] as CollectionFolder[], error: describeError(failure) }; }
@@ -352,6 +358,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const showingEnvironment = environmentPanels.left !== null || environmentPanels.right !== null;
   const previewSide = quickViewSource === null ? null : opposite(quickViewSource);
   const [processPanels, setProcessPanels] = useState<Record<Side, { path?: string } | null>>({ left: null, right: null });
+  const gitPanes = {
+    left: useGitPane(panes.left.search || processPanels.left ? null : panes.left.place, panes.left.loading, panes.left.entries, fileRevision),
+    right: useGitPane(panes.right.search || processPanels.right ? null : panes.right.place, panes.right.loading, panes.right.entries, fileRevision),
+  };
   const [preferences, setPreferences] = useState(initialPreferences);
   const rowsPerGroup = useRef<Record<Side, number>>({ left: 0, right: 0 });
   const groupPageSize = useRef<Record<Side, number>>({ left: 0, right: 0 });
@@ -360,7 +370,20 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const followSystem = preferences.theme === "system" && preferences.activeScheme === null;
   const [modal, setModal] = useState<Modal | null>(null);
   const [localAppearancePick, setLocalAppearancePick] = useState<((pick: AppearancePick | null) => void) | null>(null);
-  const [fileMenu, setFileMenu] = useState<{ side: Side; x: number; y: number; entry?: Entry } | null>(null);
+  const [fileMenu, setFileMenu] = useState<{ side: Side; x: number; y: number; entry?: Entry; git?: GitFileContext;
+    paneGit?: Omit<GitPaneTarget, "action"> } | null>(null);
+  const fileMenuRequest = useRef(0);
+  const fileMenuWorkspace = useRef({ active, panes, modal, gitView });
+  fileMenuWorkspace.current = { active, panes, modal, gitView };
+  useEffect(() => {
+    const invalidate = () => { fileMenuRequest.current++; };
+    window.addEventListener("pointerdown", invalidate, true);
+    window.addEventListener("blur", invalidate);
+    return () => {
+      window.removeEventListener("pointerdown", invalidate, true);
+      window.removeEventListener("blur", invalidate);
+    };
+  }, []);
   const [updateNotice, setUpdateNotice] = useState<Extract<Modal, { kind: "update" | "upToDate" }> | null>(null);
   const [installedRelease, setInstalledRelease] = useState<InstalledRelease | null | undefined>(undefined);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
@@ -540,21 +563,12 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const archive = pane.place?.kind === "archive" ? pane.place : undefined;
   const fileServer = isFileServer(pane.place) ? pane.place : undefined;
   const writableServer = isWritableServerPlace(pane.place) ? pane.place : undefined;
-  const kswitcher = pane.place?.kind === "kswitcher" && pane.place.path ? pane.place : undefined;
-  const kswitcherWrite = kswitcher?.capabilities?.write;
-  const kswitcherDelete = kswitcher?.capabilities?.delete;
   const actionDirectory = treeFolder(active) ?? pane.place;
-  const canCreateItem = actionDirectory?.kind === "local" || isFileServer(actionDirectory) ||
-    isWritableServerPlace(actionDirectory) ||
-    actionDirectory?.kind === "archive" && actionDirectory.canAdd ||
-    actionDirectory?.kind === "kswitcher" && !!actionDirectory.path || actionDirectory?.kind === "googleDrive";
+  const canCreateItem = canCreateIn(actionDirectory);
   const remoteTrash = Boolean(fileServer?.environment?.recycleBin?.keepDeleted);
   const permanentDelete = Boolean(fileServer && !remoteTrash || writableServer || smbHost(local));
-  const canTransfer = Boolean(currentItem && (currentItem.place.kind !== "kswitcher" ||
-    currentItem.place.path && !currentItem.entry.link) &&
-    (currentItem.place.kind !== "googleDrive" ||
-      panes[opposite(active)].place?.kind === "googleDrive" ||
-      panes[opposite(active)].place?.kind === "local" && !smbHost(panes[opposite(active)].place)));
+  const selectionActions = fileSourceActions(currentItem?.place ?? null);
+  const canTransfer = selectionActions.copy && (currentItem?.place.kind !== "kswitcher" || !currentItem.entry.link);
   const shortcuts = shortcutBindings(preferences);
   const editingDocument = documents.find(({ id }) => id === activeDocument)?.editing;
   const [helpRequest, setHelpTopic] = useHelpShortcut(shortcuts.help, contextHelpTopic(modal?.kind, editingDocument));
@@ -1323,6 +1337,42 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     setModal({ kind: "collect", side, path, references });
   }
 
+  function transferCollectionEntries(side: Side, entries: CollectionEntry[], moving: boolean) {
+    const from = collectionPanes[side];
+    const to = collectionPanes[opposite(side)];
+    if (!from || !to) return;
+    try { saveCollections(copyCollectionEntries(collectionState.items, from, to, entries, moving)); }
+    catch (failure) { setStatus({ text: describeError(failure), error: true }); }
+  }
+
+  async function openCollectionOriginal(side: Side, reference: CollectionReference) {
+    const original = collectionPanes[side];
+    const ticket = invalidateListing(side);
+    const temporary: Resource[] = [];
+    const current = () => request.current[side] === ticket && !!document.getElementById(side + "-collections");
+    const resolve = (password?: string) => resolveCollectionReference(reference, preferences.kswitcher, (place) => {
+      if ("id" in place && place.kind !== "googleDrive") temporary.push(place);
+    }, password, [connected.current.left, connected.current.right, panes.left.place, panes.right.place]
+      .flatMap((place) => place && place.kind !== "connections" && place.kind !== "smbRoot" ? [place] : []));
+    const show = ({ place, entry, listing }: Awaited<ReturnType<typeof resolve>>) => {
+      if (!current()) { temporary.forEach(disconnect); return; }
+      if (original) setCollectionPanes((items) => ({ ...items, [side]: null }));
+      routeLocation(side, place, listing, entry.name);
+      focusRevealedSide(side);
+    };
+    try { show(await resolve()); }
+    catch (failure) {
+      temporary.forEach(disconnect);
+      temporary.length = 0;
+      if (!current()) return;
+      const error = describeError(failure);
+      if (reference.origin.kind === "archive" && error === passwordError) {
+        setModal({ kind: "collectionArchivePassword",
+          submit: async (password) => { show(await resolve(password)); setModal(null); }, cancel: () => setModal(null) });
+      } else setStatus({ text: t("Could not open {0}. {1}", collectionReferencePath(reference), error), error: true });
+    }
+  }
+
   async function exportCollection(side: Side, entries: CollectionEntry[]) {
     if (modal || !entries.length) return;
     const other = opposite(side);
@@ -1368,17 +1418,19 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       }
       return;
     }
-    const allLocal = items.every(({ place }) => place.kind === "local");
-    const remoteDestination = !folders.length && allLocal && isFileServer(target) ? target : undefined;
-    const archiveDestination = !folders.length && allLocal && target?.kind === "archive" && target.canAdd &&
+    const remoteDestination = isFileServer(target) ? target : undefined;
+    const archiveDestination = target?.kind === "archive" && target.canAdd &&
       items.every(({ entry }) => !entry.link) ? target : undefined;
-    const kswitcherDestination = !folders.length && allLocal && target?.kind === "kswitcher" && target.path && target.capabilities?.write &&
+    const kswitcherDestination = target?.kind === "kswitcher" && target.path && target.capabilities?.write &&
       items.every(({ entry }) => !entry.link) ? target : undefined;
-    const destination = localTarget ?? remoteDestination ?? archiveDestination ?? kswitcherDestination;
+    const googleDriveDestination = target?.kind === "googleDrive" ? target : undefined;
+    const serverDestination = isWritableServerPlace(target) ? target : undefined;
+    const destination = localTarget ?? remoteDestination ?? archiveDestination ?? kswitcherDestination ?? googleDriveDestination ?? serverDestination;
     const source = items[0]?.place ?? localTarget ?? localPath("");
     setModal({ kind: "transfer", side, temporary, transfer: {
       kind: "copy", source, items, target: destination ? placePath(destination) : "",
-      archiveDestination, remoteDestination, kswitcherDestination, kswitcherBroker: !!kswitcherDestination,
+      archiveDestination, remoteDestination, kswitcherDestination, googleDriveDestination, serverDestination,
+      kswitcherBroker: !!kswitcherDestination && items.every(({ place }) => place.kind === "local"),
       collection: { folders, unavailable, needsLocalDestination: !!target && !destination },
     } });
   }
@@ -1658,9 +1710,9 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     return shared ? { ...place, id: shared.id } : place;
   }, []);
 
-  function diskPath(side: Side) {
+  function diskTarget(side: Side) {
     const place = analysisPanes[side]?.location.place ?? treeFolder(side) ?? panes[side].place;
-    return place?.kind === "local" ? place.path : null;
+    return place?.kind === "local" || place?.kind === "googleDrive" ? place : null;
   }
 
   function toggleDiskInformation(side: Side) {
@@ -1668,9 +1720,9 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       closeDiskInformation(diskSide);
       return;
     }
-    const path = diskPath(side);
-    if (!path || !canSelectPanelMode(side)) return;
-    setDiskPanes((current) => ({ ...current, [opposite(side)]: path }));
+    const target = diskTarget(side);
+    if (!target || !canSelectPanelMode(side)) return;
+    setDiskPanes((current) => ({ ...current, [opposite(side)]: target }));
   }
 
   function closeDiskInformation(side: Side) {
@@ -1709,8 +1761,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   function selectAnalysisLocation(side: Side, id: number, location: AnalysisPane["location"]) {
     setAnalysisPanes((panes) => {
       const current = panes[side];
-      if (!current || current.id !== id || current.location.reveal === location.reveal &&
-          placePath(current.location.place) === placePath(location.place)) return panes;
+      if (!current || current.id !== id) return panes;
+      const sameFolder = location.place.kind === "googleDrive"
+        ? spaceRelativePath(current.location.place, location.place)?.length === 0
+        : placePath(current.location.place) === placePath(location.place);
+      if (current.location.reveal === location.reveal && sameFolder) return panes;
       return { ...panes, [side]: { ...current, location } };
     });
   }
@@ -1721,6 +1776,15 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     setGitView(null);
     setActive(source);
     requestAnimationFrame(() => focus(source));
+  }
+
+  function openGitView(side: Side, path: string, file?: GitFileLaunch) {
+    for (const side of ["left", "right"] as const) {
+      if (pendingListings.current[side] && !panes[side].loading) invalidateListing(side);
+    }
+    setQuickViewSource(null);
+    setActive(side);
+    setGitView({ side, source: side, path, file });
   }
 
   function showEnvironment(side: Side, mode: EnvironmentMode | null) {
@@ -2005,13 +2069,17 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
   }
 
-  async function openArchive(side: Side, path: string, password?: string) {
+  async function openArchive(side: Side, path: string, password?: string, segments: string[] = []) {
     const { ticket, signal } = beginListing(side);
     updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: path }));
     try {
-      const { listing, ...opened } = await api.openArchive(path, password);
+      const { listing: rootListing, ...opened } = await api.openArchive(path, password);
       if (signal.aborted || ticket !== request.current[side]) { await api.closeArchive(opened.id); return; }
-      const place: ArchivePlace = { ...opened, kind: "archive", segments: [],
+      let listing = rootListing;
+      try { if (segments.length) listing = await api.listArchive(opened.id, segments); }
+      catch (error) { void api.closeArchive(opened.id).catch(() => {}); throw error; }
+      if (signal.aborted || ticket !== request.current[side]) { await api.closeArchive(opened.id); return; }
+      const place: ArchivePlace = { ...opened, kind: "archive", segments,
         address: opened.writable ? "Archive" : "Read-only archive" };
       updatePane(side, (pane) => applyListing(pane, place, listing, "push"));
     } catch (error) {
@@ -2040,8 +2108,24 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
 
   function currentFolderShortcut(side: Side) {
     const target = panes[side];
-    if (panelsHidden || processPanels[side] || target.loading || target.search) return;
-    return shortcutFromPlace(target.place);
+    if (panelsHidden || processPanels[side] || target.loading) return;
+    if (collectionPanes[side]) {
+      const folders = collectionPanes[side];
+      const trail = collectionTrail(collectionState.items, folders);
+      if (trail.length === folders.length) return { title: "", path: [t("Collections"), ...trail.map(({ name }) => name)].join(" / "),
+        location: { kind: "collection", folders } } satisfies FolderShortcut;
+      return;
+    }
+    if (recentPanes[side]) {
+      const current = recentSelection.current[side];
+      return current ? shortcutFromRecent(current) : undefined;
+    }
+    if (target.search) {
+      const match = target.selected ? target.search.matches.get(target.selected) : undefined;
+      if (!match || match.directory.kind === "smbRoot") return;
+      return shortcutFromPlace(match.entry.directory ? childPlace(match.directory, match.entry.name) : match.directory);
+    }
+    return shortcutFromPlace(treeFolder(side) ?? target.place);
   }
 
   function addFolderShortcut(group: FolderGroup) {
@@ -2057,6 +2141,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   }
 
   function closeFolderShortcuts(side: Side) {
+    activeModal.current = null;
     setModal(null);
     requestAnimationFrame(() => {
       if (!document.activeElement?.closest(".pane")) focus(side);
@@ -2069,7 +2154,56 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       revealWorkspaceSide(side);
       focusRevealedSide(side);
     }
+    const location = entry.location;
+    if (location) {
+      if (processPanels[side]) showProcesses(side, false);
+      switch (location.kind) {
+        case "smb": await openSavedConnection(side, { kind: "smb", id: location.url, label: entry.path, path: location.url }); return;
+        case "lan": await openLanGroupDrive(side, location.peer, location.name, location.segments); return;
+        case "collection": {
+          if (collectionTrail(collectionState.items, location.folders).length !== location.folders.length) {
+            setStatus({ text: t("The saved collection folder is unavailable: {0}", entry.path), error: true });
+            return;
+          }
+          setCollectionPanes((current) => ({ ...current, [side]: location.folders }));
+          focusRevealedSide(side);
+          return;
+        }
+        case "archive":
+          try { await openArchive(side, location.file, undefined, location.segments); }
+          catch (failure) {
+            const error = describeError(failure);
+            if (error === passwordError) setModal({ kind: "archivePassword", side, path: location.file, segments: location.segments });
+            else setStatus({ text: t("Could not open {0}. {1}", entry.path, error), error: true });
+          }
+          return;
+        case "googleDrive": {
+          const requestBefore = request.current[side];
+          try {
+            const profile = (await api.googleDriveProfiles()).find(({ id }) => id === location.id);
+            if (requestBefore !== request.current[side]) return;
+            if (!profile) throw new Error(t("Add this Google Drive account again from the pane sources."));
+            if (profile.signInNeeded) {
+              setStatus({ text: t(googleDriveSignInRequired), error: true });
+              editConnection(side, "googleDrive", { ...profile, kind: "googleDrive" });
+            } else await load(side, { kind: "googleDrive", id: profile.id, address: profile.label, email: profile.email, folders: location.folders });
+          } catch (failure) {
+            if (requestBefore === request.current[side]) {
+              setStatus({ text: t("Could not open {0}. {1}", entry.path, describeError(failure)), error: true });
+            }
+          }
+          return;
+        }
+      }
+    }
     if (entry.remote) {
+      if (entry.remote.kind === "server" && entry.remote.profileId) {
+        const profile = readRemoteProfiles().find(({ id }) => id === entry.remote?.profileId);
+        if (profile?.kind === "server") {
+          await openSavedConnection(side, profile, { segments: entry.path.split("/").filter(Boolean) });
+          return;
+        }
+      }
       await openNetworkFolderShortcut(side, entry.remote, entry.path);
       return;
     }
@@ -2117,35 +2251,24 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       await load(side, { ...existing, segments });
       return;
     }
+    if (remote.kind !== "server") {
+      await openSavedConnection(side, { kind: remote.kind, id: remote.id, label: remote.name }, { segments });
+      return;
+    }
 
     const { ticket, signal } = beginListing(side);
     updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: path, error: "", elevationPath: undefined }));
     try {
-      let place: NetworkPlace;
-      let listing: Listing;
-      if (remote.kind === "ftp") {
-        ({ place, listing } = await connectFtpLocation(remote.id, segments, undefined, signal));
-      } else if (remote.kind === "ssh") {
-        const result = await api.connectSsh(remote.id, undefined, segments, undefined, signal);
-        if (result.kind === "verifyHost") throw new Error(t("Verify the host key in SSH connections before opening this shortcut."));
-        place = { kind: "ssh", id: result.id, profileId: remote.id, address: result.address, origin: result.origin, segments: result.segments };
-        listing = result.listing;
-      } else {
-        const shared = connected.current[opposite(side)];
-        if (shared?.kind !== "server" || !matches(shared)) {
-          throw new Error(t("Connect to the Dirlume server at {0} before opening this shortcut.", remote.name));
-        }
-        place = { ...shared, segments };
-        listing = await api.listServer(shared.id, segments);
-        if (!sameConnection(connected.current[opposite(side)], shared)) {
-          throw new Error(t("Connect to the Dirlume server at {0} before opening this shortcut.", remote.name));
-        }
+      const shared = connected.current[opposite(side)];
+      if (shared?.kind !== "server" || !matches(shared)) {
+        throw new Error(t("Connect to the Dirlume server at {0} before opening this shortcut.", remote.name));
       }
-      if (signal.aborted || ticket !== request.current[side]) {
-        if (place.kind !== "server") disconnect(place);
-        return;
+      const listing = await api.listServer(shared.id, segments);
+      if (signal.aborted || ticket !== request.current[side]) return;
+      if (!sameConnection(connected.current[opposite(side)], shared)) {
+        throw new Error(t("Connect to the Dirlume server at {0} before opening this shortcut.", remote.name));
       }
-      routeLocation(side, place, listing);
+      routeLocation(side, { ...shared, segments }, listing);
     } catch (error) {
       if (!signal.aborted && ticket === request.current[side]) {
         updatePane(side, (pane) => ({ ...pane, loading: false, loadingPath: undefined, error: describeError(error) }));
@@ -2339,15 +2462,6 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   function openTransfer(kind: Transfer["kind"], source: Transfer["source"], items: Transfer["items"], target: Place | null,
     chooseOperation = false, side = active) {
     if (!items.length) return;
-    if (kind === "copy" && source.kind === "googleDrive") {
-      if (target?.kind !== "googleDrive" && (target?.kind !== "local" || smbHost(target))) {
-        setStatus({ text: "Choose a local folder or a Google Drive folder in the other pane.", error: true });
-        return;
-      }
-    } else if (kind === "copy" && target?.kind === "googleDrive" && source.kind !== "local") {
-      setStatus({ text: "Choose a local file or use the same Google Drive account in both panes.", error: true });
-      return;
-    }
     if (kind === "move" && (source.kind === "archive" && !source.writable ||
       source.kind === "server" && !isWritableServerPlace(source))) {
       setStatus({ text: "This source is read-only.", error: true });
@@ -2503,17 +2617,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
     const targetSide = opposite(side);
     if (kind === "copy" && collectionPanes[targetSide]) {
-      if (source.kind === "googleDrive") {
-        setStatus({ text: "Copy one Google Drive file to a local folder.", error: true });
-        return;
-      }
-      if (kind === "copy") collectReferences(side, transferItems(side, selected).flatMap(({ place, entry }) =>
-        place.kind === "googleDrive" ? [] : [collectionReference(place, entry)]));
+      collectReferences(side, transferItems(side, selected).map(({ place, entry }) => collectionReference(place, entry)));
       return;
     }
-    if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && source.kind !== "googleDrive" && !isFileServer(source) && !isWritableServerPlace(source) &&
-      !(source.kind === "archive" && source.writable) &&
-      (source.kind !== "kswitcher" || !source.capabilities?.delete))) return;
+    if (kind === "move" && (state.search && !localSearchRoot(state) || !fileSourceActions(source).remove)) return;
     const otherPane = panes[targetSide];
     const target = collectionPanes[targetSide] || otherPane.search || kind === "move" && state.search &&
       (otherPane.place?.kind !== "local" || smbHost(otherPane.place) || paneCovered(targetSide) ||
@@ -2609,6 +2716,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   }
 
   function contextActions(side: Side, x: number, y: number, entry?: Entry, preserveMarks = false) {
+    const request = ++fileMenuRequest.current;
     setActive(side);
     setFileMenu(null);
     if (entry && !panes[side].marked.includes(entry.name)) {
@@ -2620,12 +2728,31 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     const state = panes[side];
     const item = entry ? paneItem(state, entry) : null;
     const place = entry ? item?.place : state.search ? null : state.place;
-    if (isTauri() && windowsClient && place?.kind === "local") {
-      void api.windowsItemMenu(place.path, item?.entry.name).catch((failure: unknown) => {
-        setStatus({ text: describeError(failure), error: true });
-        setFileMenu({ side, x, y, entry });
-      });
-    } else setFileMenu({ side, x, y, entry });
+    const gitListing = gitPanes[side]?.listing;
+    const path = entry && item && !item.entry.directory && gitListing ? gitPanePath(gitListing, entry) : undefined;
+    const paneGit = path !== undefined && gitListing ? { source: gitListing.source, root: gitListing.status.root, path,
+      head: gitListing.status.head, previousPath: gitListing.files.get(path)?.find(({ status }) => status === "R")?.previousPath ?? undefined } : undefined;
+    const menu = { side, x, y, entry, paneGit };
+    function stillCurrent() {
+      const current = fileMenuWorkspace.current;
+      return fileMenuRequest.current === request && current.active === side && !current.modal && !current.gitView &&
+        current.panes[side].place === state.place && current.panes[side].search === state.search;
+    }
+    function show(git?: GitFileContext) {
+      if (paneGit || git && (git.head || git.hasDiff)) setFileMenu({ ...menu, git });
+      else if (isTauri() && windowsClient && place?.kind === "local") {
+        void api.windowsItemMenu(place.path, item?.entry.name).catch((failure: unknown) => {
+          if (!stillCurrent()) return;
+          setStatus({ text: describeError(failure), error: true });
+          setFileMenu(menu);
+        });
+      } else setFileMenu(menu);
+    }
+    const multiFile = !!entry && state.marked.length > 1 && (preserveMarks || state.marked.includes(entry.name));
+    if (isTauri() && !multiFile && item && !item.entry.directory && !item.entry.link && item.place.kind === "local" && !smbHost(item.place)) {
+      void api.gitFileContext(item.place.path, item.entry.name).then(
+        (git) => { if (stillCurrent()) show(git); }, () => { if (stillCurrent()) show(); });
+    } else show();
   }
 
   function finishDrag(event: PointerEvent<HTMLDivElement>) {
@@ -3181,18 +3308,15 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       if (panesAvailable && !gitView && !showingAnalysis) showEnvironment(active, environmentPanels[active] ? null : "root");
       return;
     }
+    const bookmark = folderGroupCommand(command);
+    const folderShortcutCommand = !!bookmark || command === "folderShortcuts" || command === "addFolderShortcut";
     if ((environmentActive || recentActive || collectionActive) &&
-        !["switchPane", "menu", "help", "settings", "close", "shrinkLeft", "growLeft"].includes(command)) return;
+        !["switchPane", "menu", "help", "settings", "close", "shrinkLeft", "growLeft"].includes(command) &&
+        !((recentActive || collectionActive) && folderShortcutCommand)) return;
     if (command === "gitView") {
       if (!canToggleGitView) return;
       if (gitView) closeGitView();
-      else if (local) {
-        for (const side of ["left", "right"] as const) {
-          if (pendingListings.current[side] && !panes[side].loading) invalidateListing(side);
-        }
-        setQuickViewSource(null);
-        setGitView({ side: active, source: active, path: local.path });
-      }
+      else if (local) openGitView(active, local.path);
       return;
     }
     if (gitView) {
@@ -3243,7 +3367,6 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       toggleTerminal();
       return;
     }
-    const bookmark = folderGroupCommand(command);
     if (bookmark) {
       if (bookmark.add) addFolderShortcut(bookmark.group);
       else if (!panelsHidden) openFolderGroup(active, bookmark.group);
@@ -3421,6 +3544,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         }
         break;
       case "rename": {
+        if (!currentItem || !canRenameItem(currentItem.place, currentItem.entry)) break;
         if (currentItem?.place.kind === "googleDrive" && currentItem.entry.googleDrive && !busy && !pane.loading && !pane.search) {
           setModal({ kind: "rename", path: placePath(currentItem.place), name: currentItem.entry.googleDrive.name,
             drive: { side: active, place: currentItem.place, itemIds: [currentItem.entry.googleDrive.id] } });
@@ -3544,6 +3668,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       const fromList = target.id === active + (collectionActive ? "-collections" : recentActive ? "-recent" : "-environment");
       const tabThroughRecent = (recentActive || collectionActive) && event.key === "Tab" && !event.altKey && !event.ctrlKey && !event.metaKey;
       if (command && (["environmentVariables", "menu", "help", "close", "shrinkLeft", "growLeft", "leftLocations", "rightLocations"].includes(command) ||
+          (recentActive || collectionActive) && fromList && (folderGroupCommand(command) || command === "folderShortcuts" || command === "addFolderShortcut") ||
           command === "switchPane" && fromList && !tabThroughRecent)) {
         event.preventDefault();
         if (!event.repeat) perform(command);
@@ -3638,14 +3763,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     { command: "copy", label: collectionPanes[opposite(active)] ? "Add to collection" : "Copy",
       Icon: Copy, disabled: !canTransfer || busy },
     { command: "move", label: "Move", Icon: ArrowLeftRight,
-      disabled: (!local && !fileServer && !writableServer && !archive?.writable && !kswitcherDelete && !currentItem?.entry.googleDrive) ||
+      disabled: !selectionActions.remove ||
         !!pane.search && !localSearchRoot(pane) || !currentItem || busy },
-    { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !fileServer && !writableServer && !archive?.canAdd && !kswitcherWrite && !currentItem?.entry.googleDrive) ||
-      !!pane.search || !current || ((archive || kswitcher || writableServer) && current.link) || busy },
+    { command: "rename", label: "Rename", Icon: TextCursorInput,
+      disabled: !currentItem || !canRenameItem(currentItem.place, currentItem.entry) || !!pane.search || busy },
     { command: "newFile", label: "New file", Icon: FilePlus, disabled: !canCreateItem || !!pane.search || busy },
     { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !canCreateItem || !!pane.search || busy },
     { command: "recycle", label: permanentDelete || archive ? "Delete" : "Trash", Icon: Trash2,
-      disabled: (!local && !fileServer && !writableServer && !archive?.writable && !kswitcherDelete && !currentItem?.entry.googleDrive) || !!pane.search && !localSearchRoot(pane) || !current || busy },
+      disabled: !selectionActions.remove || !!pane.search && !localSearchRoot(pane) || !current || busy },
     { command: "compare", label: "Compare", Icon: FileDiff, disabled: comparison === null },
     { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
   ] as const);
@@ -3711,7 +3836,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             if (analysisPanes[side]) focus(side);
             else if (canAnalyze(target.place)) openSpaceAnalyzer(side, target.place);
           } },
-        { ...menuCommand("diskInformation", !diskSide && (!canSelectPanelMode(side) || !diskPath(side))),
+        { ...menuCommand("diskInformation", !diskSide && (!canSelectPanelMode(side) || !diskTarget(side))),
           checked: diskSide === opposite(side), run: () => toggleDiskInformation(side) },
         { ...menuCommand("sortMenu", !canSelectPanelMode(side)), separatorBefore: true, run: () => showSortMenu(side) },
         menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null, "Sources"),
@@ -3847,6 +3972,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             layout={preferences.layout} showHidden={preferences.hidden} rightClickSelection={preferences.rightClickSelection}
             pane={paneSizes[side] ? { ...panes[side], backgroundSizes: paneSizes[side] } : panes[side]}
             entries={entries[side]} fileTypes={fileTypes} locations={locations} addressPlace={treeFolder(side)}
+            gitListing={gitPanes[side]?.listing} gitUnavailable={!!gitPanes[side]?.unavailable}
             fileView={trees[side].enabled ? "tree" : "list"} onFileView={(view) => void setFilePaneView(side, view)}
             onTreeBranch={(entry) => toggleTreeBranch(side, entry)} folderSizes={folderSizes[side]}
             onFolderSizes={() => {
@@ -3914,6 +4040,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             onStartDrag={(entry, event) => startDrag(side, entry, event)} dropTarget={dropTarget === side}
             processView={processPanels[side]} onProcesses={(visible) => showProcesses(side, visible)}
             processContextMenuShortcut={shortcuts.processContextMenu}
+            fileContextMenuShortcut={shortcuts.fileContextMenu}
             onShowExecutable={(path) => revealProcessExecutable(side, path)}
             onProcessFeedback={(text, error) => setStatus({ text, error })}
             onContext={(x, y, entry, preserveMarks) => contextActions(side, x, y, entry, preserveMarks)}
@@ -3928,6 +4055,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           <RecentLocationsPane key={swappedPanes ? opposite(side) : side} side={side} active={active === side}
             locations={recentLocations} sourceMenu={paneSources(side)} error={panes[side].error} loading={panes[side].loading}
             onFocus={() => setActive(side)} onClose={() => closeRecent(side)} onOpen={(location) => void openRecent(side, location)}
+            onSelection={(location) => { recentSelection.current[side] = location; }}
             onRemove={(location) => setRecentLocations((items) => items.filter((item) => recentLocationKey(item) !== recentLocationKey(location)))}
             onClear={() => setRecentLocations([])} onEdit={(location) => void editRecentConnection(side, location)}
             copyBindings={shortcuts.copy} onCollect={collectionPanes[opposite(side)] ? (location) => {
@@ -3940,9 +4068,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           return path && <CollectionsPane key={swappedPanes ? opposite(side) : side} side={side} active={active === side}
             collections={collectionState.items} path={path} sourceMenu={paneSources(side)} shortcuts={shortcuts}
             loadError={collectionState.error} onFocus={() => setActive(side)}
-            onPath={(path) => setCollectionPanes((current) => ({ ...current, [side]: path }))}
+            onPath={(path) => { invalidateListing(side); setCollectionPanes((current) => ({ ...current, [side]: path })); }}
             onClose={() => { setCollectionPanes((current) => ({ ...current, [side]: null })); focusRevealedSide(side); }}
-            onChange={saveCollections} onCopy={(entries) => void exportCollection(side, entries)} />;
+            onChange={saveCollections} onCopy={(entries) => {
+              if (collectionPanes[opposite(side)]) transferCollectionEntries(side, entries, false);
+              else void exportCollection(side, entries);
+            }}
+            onMove={collectionPanes[opposite(side)] ? (entries) => transferCollectionEntries(side, entries, true) : undefined}
+            onOriginal={(reference) => void openCollectionOriginal(side, reference)} />;
         })}
         {(["left", "right"] as const).map((side) => {
           const mode = environmentPanels[side];
@@ -3958,15 +4091,19 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         {gitView && <Suspense fallback={<section className={"pane git-pane git-pane-" + gitView.side}>
           <p className="pane-empty" role="status">{t("Reading Git repository…")}</p>
         </section>}>
-          <GitView key={gitView.path} side={gitView.side} path={gitView.path} refresh={gitRefresh} menuShortcut={shortcuts.gitContextMenu}
+          <GitView key={gitView.path} side={gitView.side} path={gitView.path} file={gitView.file} refresh={gitRefresh} menuShortcut={shortcuts.gitContextMenu}
+            compareShortcuts={{ previousShortcut: shortcuts.previousChange, nextShortcut: shortcuts.nextChange, swapShortcut: shortcuts.swap }}
             onOpen={openDocument} canEdit={(file) => imageType(file.name) ? canEditImage(file) : writableTextPlace(file.place)}
-            onOpenWorktree={(path) => setGitView((current) => current && { ...current, path })}
+            onOpenWorktree={(path) => setGitView((current) => current && { ...current, path, file: undefined })}
             onTerminal={openGitTerminal}
             onRefresh={() => setGitRefresh((revision) => revision + 1)} onClose={closeGitView} />
         </Suspense>}
-        {(["left", "right"] as const).map((side) => diskPanes[side] && <DiskInformation key={side + diskPanes[side]}
-          side={side} path={diskPanes[side]} active={active === side} onFocus={() => setActive(side)}
-          onClose={() => closeDiskInformation(side)} onScan={(root) => openSpaceAnalyzer(side, localPath(root), true, "sunburst")} />)}
+        {(["left", "right"] as const).map((side) => {
+          const target = diskPanes[side];
+          return target && <DiskInformation key={side + (target.kind === "local" ? target.path : target.id)}
+            side={side} target={target} active={active === side} onFocus={() => setActive(side)}
+            onClose={() => closeDiskInformation(side)} onScan={(root) => openSpaceAnalyzer(side, root, true, root.kind === "googleDrive" ? "treemap" : "sunburst")} />;
+        })}
         {(["left", "right"] as const).map((side) => {
           const analyzer = analysisPanes[side];
           return analyzer && <Suspense key={analyzer.id} fallback={<section className={"pane space-analyzer space-analyzer-" + side}>
@@ -4335,18 +4472,53 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           await load(modal.side, place, action, reveal, password);
         }} />}
       {modal?.kind === "mcp" && <McpDialog onClose={() => setModal(null)} />}
+      {modal?.kind === "gitPane" && <GitPaneInspection target={modal.target}
+        shortcuts={{ previousShortcut: shortcuts.previousChange, nextShortcut: shortcuts.nextChange, swapShortcut: shortcuts.swap }}
+        onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }} />}
       {modal?.kind === "commandHistory" && <CommandHistory commands={historyItems} onClose={() => setModal(null)}
         onChoose={(line) => { historyIndex.current = -1; setCommandLine(line); setModal(null); showCommandLine(); }} />}
       {fileMenu && !modal && (() => {
-        const { side, x, y, entry } = fileMenu;
+        const { side, x, y, entry, git, paneGit } = fileMenu;
         const state = panes[side];
         const item = entry ? paneItem(state, entry) : null;
+        const document = fileFor(side, entry);
         const driveEditor = driveEditorLink(item?.entry);
         const driveLink = driveEditor ?? item?.entry.googleDrive?.webViewLink;
         const kswitcherItem = item?.place.kind === "kswitcher" ? item.place : undefined;
         const target = panes[opposite(side)];
         const toCollection = collectionPanes[opposite(side)] !== null;
-        return <FileContextMenu x={x} y={y} onClose={() => setFileMenu(null)} onReturn={() => focus(side)}>
+        function openGitFile(action: GitFileLaunch["action"]) {
+          if (!git) return;
+          const file: GitFileLaunch | undefined = action === "diff" ? { action, path: git.path } :
+            git.head ? { action, path: git.path, head: git.head } : undefined;
+          if (file) {
+            setFileMenu(null);
+            openGitView(side, git.root, file);
+          }
+        }
+        function inspectGitPane(action: GitPaneAction) {
+          if (!paneGit) return;
+          setFileMenu(null);
+          setModal({ kind: "gitPane", side, target: { ...paneGit, action } });
+        }
+        return <FileContextMenu x={x} y={y} className={git || paneGit ? "file-menu-with-git" : undefined}
+          onClose={() => setFileMenu(null)} onReturn={() => focus(side)}>
+          {(git || paneGit) && <>
+            <div role="group" aria-label="Git" className="file-git-actions">
+              <div className="file-git-heading" aria-hidden="true">Git</div>
+              {(paneGit || git?.hasHistory) && <Button role="menuitem" onClick={() => paneGit ? inspectGitPane("history") : openGitFile("history")}><FileClock aria-hidden="true" />{t("Show history")}</Button>}
+              {git?.hasBlame && <Button role="menuitem" onClick={() => openGitFile("blame")}><Search aria-hidden="true" />{t("Show blame")}</Button>}
+              {paneGit && <Button role="menuitem" onClick={() => inspectGitPane("compare")}><GitCompareArrows aria-hidden="true" />{t("Compare with HEAD")}</Button>}
+              {git?.head && <Button role="menuitem" onClick={() => openGitFile("compare")}><GitCompareArrows aria-hidden="true" />{t("Compare with revision…")}</Button>}
+              {(paneGit || git?.hasDiff) && <Button role="menuitem" onClick={() => paneGit ? inspectGitPane("diff") : openGitFile("diff")}><FileDiff aria-hidden="true" />{t("Show diff")}</Button>}
+            </div>
+            <div role="separator" className="main-menu-separator" />
+            {windowsClient && item?.place.kind === "local" && <Button role="menuitem" onClick={() => {
+              if (item.place.kind !== "local") return;
+              setFileMenu(null);
+              void api.windowsItemMenu(item.place.path, item.entry.name).catch((error) => setStatus({ text: describeError(error), error: true }));
+            }}>{t("Windows context menu…")}</Button>}
+          </>}
           {state.place?.kind === "connections" && (() => {
             const { source } = state.place;
             return <>
@@ -4366,6 +4538,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             setFileMenu(null);
             open(side, entry);
           }}>{t("Open")}</Button>}
+          {state.search && item && <Button role="menuitem" onClick={() => {
+            setFileMenu(null);
+            revealResult(side, item.place, item.entry.name);
+          }}>{t("Open original location")}</Button>}
           {item?.place.kind === "googleDrive" && entry && <>
             {item.entry.directory && <Button role="menuitem" onClick={() => { setFileMenu(null); open(side, entry); }}>{t("Open")}</Button>}
             {driveLink && <Button role="menuitem" onClick={() => {
@@ -4377,9 +4553,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               setFileMenu(null);
               if (file) openDocument(file, action === "edit", { fromPane: side });
             }}>{t(action === "view" ? "View" : "Edit")}</Button>)}
-            {(["copy", "move"] as const).map((action) => <Button key={action} role="menuitem" disabled={action === "copy" && (toCollection || !!target.search ||
-              target.place?.kind !== "googleDrive" && (target.place?.kind !== "local" || !!smbHost(target.place)))}
-              onClick={() => { setFileMenu(null); transfer(action, side, entry); }}>{t(action === "copy" ? "Copy" : "Move")}</Button>)}
+            {(["copy", "move"] as const).map((action) => <Button key={action} role="menuitem" disabled={toCollection && action === "move" || !!target.search}
+              onClick={() => { setFileMenu(null); transfer(action, side, entry); }}>{t(action === "copy" ? toCollection ? "Add to collection" : "Copy" : "Move")}</Button>)}
             {!busy && !state.loading && item.entry.googleDrive && <>
               <Button role="menuitem" onClick={() => {
                 const { place } = item;
@@ -4393,21 +4568,27 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             </>}
           </>}
           {item && item.place.kind !== "googleDrive" && <>
+            {item.entry.directory && entry && <Button role="menuitem"
+              onClick={() => { setFileMenu(null); open(side, entry); }}>{t("Open")}</Button>}
+            {document && <Button role="menuitem" onClick={() => {
+              setFileMenu(null);
+              openDocument(document, false, { fromPane: side });
+            }}>{t("View")}</Button>}
+            {document && (imageType(document.name) ? canEditImage(document) : writableTextPlace(document.place)) &&
+              <Button role="menuitem" onClick={() => {
+                setFileMenu(null);
+                openDocument(document, true, { fromPane: side });
+              }}>{t("Edit")}</Button>}
             <Button role="menuitem" disabled={!toCollection && item.place.kind === "kswitcher" && (!item.place.path || item.entry.link)}
               onClick={() => {
               setFileMenu(null);
               const items = transferItems(side, entry!, state.marked.includes(entry!.name));
-              if (toCollection) collectReferences(side, items.flatMap(({ place, entry }) =>
-                place.kind === "googleDrive" ? [] : [collectionReference(place, entry)]));
+              if (toCollection) collectReferences(side, items.map(({ place, entry }) => collectionReference(place, entry)));
               else openTransfer("copy", item.place, items,
                 target.search ? null :
                   treeFolder(opposite(side)) ?? target.place, false, side);
             }}>{t(toCollection ? "Add to collection" : "Copy")}</Button>
             {isWritableServerPlace(item.place) && entry && !state.search && !state.loading && !busy && <>
-              {!item.entry.directory && !item.entry.link && <Button role="menuitem" onClick={() => {
-                setFileMenu(null);
-                if (isWritableServerPlace(item.place)) openDocument({ place: item.place, name: item.entry.name }, true, { fromPane: side });
-              }}>{t("Edit")}</Button>}
               {!toCollection && <Button role="menuitem" onClick={() => {
                 setFileMenu(null);
                 transfer("move", side, entry);
@@ -4476,6 +4657,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               setFileMenu(null);
               showLockingProcesses(side, item);
             }}>{t("Find locking processes")}</Button>}
+          </>}
+          {!entry && !busy && !state.loading && !state.search && canCreateIn(state.place) && state.place.kind !== "local" && <>
+            <Button role="menuitem" onClick={() => { setFileMenu(null); perform("mkdir"); }}>{t("New folder")}</Button>
+            <Button role="menuitem" onClick={() => { setFileMenu(null); perform("newFile"); }}>{t("New file")}</Button>
           </>}
           {state.place?.kind === "local" && !state.search && <>
             <Button role="menuitem" onClick={() => { setFileMenu(null); void pasteClipboard(side); }}>{t("Paste files")}</Button>
@@ -4591,7 +4776,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       {modal?.kind === "createArchive" && <ArchiveDialog directory={modal.directory} names={modal.names}
         showHidden={preferences.hidden} onClose={() => setModal(null)} onCreated={() => { refresh("left"); refresh("right"); }} />}
       {modal?.kind === "archivePassword" && <ArchivePasswordDialog onClose={() => setModal(null)}
-        onOpen={async (password) => { await openArchive(modal.side, modal.path, password); setModal(null); }} />}
+        onOpen={async (password) => { await openArchive(modal.side, modal.path, password, modal.segments); setModal(null); }} />}
       {modal?.kind === "deletion" && <DeletionDialog deletion={modal.deletion} onClose={() => setModal(null)} onFinished={(result) => {
         if (modal.searchSide && result?.removedPaths.length) {
           const removed = new Set(result.removedPaths.map((segments) => segments.join("/")));

@@ -141,7 +141,13 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   await dialog().getByText("Group 0", { exact: true }).waitFor();
   await confirm();
   await openGroups();
-  assert.deepEqual(await dialog().locator(".command-menu button span:first-child").allTextContents(), ["Group 0", "Group 8"]);
+  assert.deepEqual(await dialog().locator(".command-menu button span:first-child").allTextContents(),
+    Array.from({ length: 10 }, (_, group) => `Group ${group}`));
+  await dialog().getByRole("button", { name: /^Group 1\b/ }).click();
+  assert.equal(await picker(1).getByRole("option").count(), 0);
+  assert.equal(await dialog().getByRole("button", { name: "Add", exact: true }).isEnabled(), true);
+  await page.keyboard.press("Escape");
+  await openGroups();
   await dialog().getByRole("button", { name: /^Group 0/ }).click();
   await picker(0).getByRole("option").dblclick();
   await dialog().waitFor({ state: "hidden" });

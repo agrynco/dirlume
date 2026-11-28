@@ -1898,8 +1898,13 @@ try {
     const column = pane.querySelector(".col-size").getBoundingClientRect();
     const cell = list.querySelector(".file-size").getBoundingClientRect();
     const name = pane.querySelector(".col-name").getBoundingClientRect();
-    return fits && Math.abs(column.left - cell.left) <= 1 && Math.abs(column.left - name.right) <= 1;
-  }), "Name should fill the space up to Size, with matching headers and rows.");
+    const git = pane.querySelector(".col-git")?.getBoundingClientRect();
+    const gitCell = list.querySelector(".file-git-status")?.getBoundingClientRect();
+    const adjacent = (a, b) => Math.abs(a - b) <= 1;
+    return fits && adjacent(column.left, cell.left) && (git ?
+      gitCell && adjacent(name.right, git.left) && adjacent(git.right, column.left) && adjacent(git.left, gitCell.left) :
+      adjacent(column.left, name.right));
+  }), "Name should fill the space before the metadata, with matching headers and rows.");
   assert.ok(Math.abs(await timeEdge() - initialTimeEdge) <= 1);
   const columnMenu = () => page.getByRole("menu", { name: "Columns", exact: true });
   const rightHeader = () => page.locator("#right-pane .file-columns");

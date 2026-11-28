@@ -1,16 +1,11 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Copy, FileClock, GitCompareArrows, Search } from "lucide-react";
-import { api, type GitCommit, type GitComparison, type GitDetails, type GitHistory, type GitRepository, type GitRevisionDiff } from "./api";
+import { api, type GitCommit, type GitComparison, type GitDetails, type GitHistory, type GitRepository } from "./api";
 import { Button } from "./Button";
 import { useGitMenu, type GitAction } from "./GitActions";
+import { GitFileVersions } from "./GitFileVersions";
 import { t } from "./i18n";
-
-const fallbackLabels = {
-  binary: "A text diff is unavailable for binary content.",
-  conflict: "A text diff is unavailable for this conflict.",
-  oversized: "This diff is too large to preview.",
-  unsupported: "A text diff is unavailable for this change.",
-};
+import type { ComparisonShortcuts } from "./TextTools";
 
 export function RevisionInput({ label, initial, repository, choiceName, exact = false }: {
   label: string; initial?: string; repository: GitRepository; choiceName?: string; exact?: boolean;
@@ -80,33 +75,23 @@ function UniqueCommits({ root, included, excluded, title, initial, commitActions
   </section>;
 }
 
-export function GitRevisionPatch({ root, base, target, change }: {
-  root: string; base: string | null; target: string; change: GitDetails["changes"][number];
+export function GitRevisionChange({ root, base, target, change, shortcuts, reverse = false }: {
+  root: string; base: string | null; target: string; change: GitDetails["changes"][number]; reverse?: boolean;
+  shortcuts: ComparisonShortcuts;
 }) {
-  const [diff, setDiff] = useState<GitRevisionDiff | null>(null);
-  const [error, setError] = useState(false);
-  useEffect(() => {
-    let canceled = false;
-    void api.gitRevisionDiff(root, base, target, change.path, change.previousPath)
-      .then((value) => { if (!canceled) setDiff(value); }, () => { if (!canceled) setError(true); });
-    return () => { canceled = true; };
-  }, [root, base, target, change]);
-  if (error) return <p role="alert">{t("Could not read the Git repository.")}</p>;
-  if (!diff) return <p role="status">{t("Reading change…")}</p>;
-  if (diff.fallback) return <p>{t(fallbackLabels[diff.fallback])}</p>;
-  return <pre className="git-patch" tabIndex={0} aria-label={t("Inline diff")}><code>
-    {diff.patch?.split("\n").map((line, index) => <span key={index}
-      data-diff={line.startsWith("+") && !line.startsWith("+++") ? "added" :
-        line.startsWith("-") && !line.startsWith("---") ? "removed" : undefined}>{line}{"\n"}</span>)}
-  </code></pre>;
+  const before = { revision: base, path: change.previousPath ?? change.path, absent: !base || change.status === "A" };
+  const after = { revision: target, path: change.path, absent: change.status === "D" };
+  return <GitFileVersions root={root} shortcuts={shortcuts} left={{ ...(reverse ? after : before), label: t("Before") }}
+    right={{ ...(reverse ? before : after), label: t("After") }} />;
 }
 
-export function GitRevisionComparison({ repository, target, commitActions, onInspectPath, renderDetails, onCopyPath }: {
+export function GitRevisionComparison({ repository, target, commitActions, onInspectPath, renderDetails, onCopyPath, shortcuts }: {
   repository: GitRepository; target?: string;
   commitActions: (commit: GitCommit, showDetails?: () => void) => GitAction[];
   onInspectPath: (target: { path: string; tip: string; mode: "history" | "blame" }) => void;
   renderDetails: (commit: GitCommit) => ReactNode;
   onCopyPath: (path: string) => void;
+  shortcuts: ComparisonShortcuts;
 }) {
   const menu = useGitMenu();
   const [result, setResult] = useState<GitComparison | null>(null);
@@ -161,7 +146,7 @@ export function GitRevisionComparison({ repository, target, commitActions, onIns
             <code>{status}</code> {previousPath ? previousPath + " → " + path : path}
           </Button>
         </li>)}</ul> : <p>{t("No changed paths.")}</p>}
-        {diff && <GitRevisionPatch key={diff.path} root={repository.root} base={result.base} target={result.target} change={diff} />}
+        {diff && <GitRevisionChange key={diff.path} root={repository.root} base={result.base} target={result.target} change={diff} shortcuts={shortcuts} />}
       </section>
     </>}
   </div>;

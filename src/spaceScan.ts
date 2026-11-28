@@ -1,18 +1,19 @@
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, folderLabel, isFileServer, placePath, windowsClient, type Entry, type FileLocation, type FilePlace, type Listing, type Place, type SpaceChange, type SpaceScanEvent, type SshPlace } from "./api";
+import { api, describeError, folderLabel, googleDriveSignInRequired, isFileServer, placePath, windowsClient, type Entry, type FileLocation, type FilePlace, type GoogleDrivePlace, type Listing, type Place, type SpaceChange, type SpaceScanEvent, type SshPlace } from "./api";
 import { childPlace, localPath, readPlace } from "./panes";
 
-export type SpacePlace = Exclude<FileLocation, { kind: "archive" | "smbRoot" | "googleDrive" }>;
+export type SpacePlace = Exclude<FileLocation, { kind: "archive" | "smbRoot" }>;
 export type Metric = "allocated" | "logical";
-export type Scope = { place: SpacePlace; kind: "volume" | "share" | "connection" };
+export type Scope = { place: SpacePlace; kind: "volume" | "share" | "connection" | "googleDrive" };
 
 export function canAnalyze(place: Place | null): place is SpacePlace {
   if (!place) return false;
   if (place.kind === "kswitcher") return !!place.path;
-  return place.kind === "local" || place.kind === "server" || isFileServer(place);
+  return place.kind === "local" || place.kind === "server" || place.kind === "googleDrive" || isFileServer(place);
 }
 
 export async function containingScope(place: SpacePlace): Promise<Scope | null> {
+  if (place.kind === "googleDrive") return { kind: "googleDrive", place: { ...place, folders: [] } };
   if (place.kind === "local") {
     const mount = await api.spaceMount(place.path);
     return { kind: mount.share ? "share" : "volume", place: localPath(mount.path) };
@@ -26,11 +27,16 @@ export async function containingScope(place: SpacePlace): Promise<Scope | null> 
 
 export function spacePath(place: SpacePlace) {
   return place.kind === "server" || isFileServer(place) ? place.origin + placePath(place)
-    : place.kind === "kswitcher" ? place.address + " · " + place.path : place.path;
+    : place.kind === "kswitcher" ? place.address + " · " + place.path : placePath(place);
 }
 
 export function spaceRelativePath(root: SpacePlace, target: SpacePlace): string[] | null {
   if (root.kind !== target.kind) return null;
+  if (root.kind === "googleDrive") {
+    if (target.kind !== "googleDrive" || root.id !== target.id ||
+        !root.folders.every(({ id }, index) => target.folders[index]?.id === id)) return null;
+    return target.folders.slice(root.folders.length).map(({ id }) => id);
+  }
   if ((root.kind === "server" || isFileServer(root)) && (!(target.kind === "server" || isFileServer(target)) || root.id !== target.id)) return null;
   if (root.kind === "kswitcher" && (target.kind !== "kswitcher" || root.peer !== target.peer || root.directory !== target.directory)) return null;
   const windows = root.kind === "kswitcher" || root.kind === "local" && windowsClient;
@@ -44,6 +50,7 @@ export function spaceRelativePath(root: SpacePlace, target: SpacePlace): string[
 
 export interface SpaceNode {
   id: number;
+  driveId?: string;
   name: string;
   directory: boolean;
   parent: SpaceNode | null;
@@ -81,15 +88,22 @@ export function initialSpaceResult(place: FilePlace): SpaceResult {
 }
 
 export function spaceLocation(root: SpacePlace, entry: SpaceNode): { place: SpacePlace; reveal?: string } {
+  if (root.kind === "googleDrive") {
+    const folders: GoogleDrivePlace["folders"] = [];
+    for (let parent = entry.directory ? entry : entry.parent; parent?.parent && parent.driveId; parent = parent.parent) {
+      folders.push({ id: parent.driveId, name: parent.name });
+    }
+    return { place: { ...root, folders: [...root.folders, ...folders.reverse()] }, reveal: entry.directory ? undefined : entry.driveId };
+  }
   const reveal = entry.directory ? undefined : entry.name;
   const segments = spaceSegments(reveal === undefined ? entry : entry.parent);
-  return { place: segments.reduce((place, name) => childPlace(place, name) as SpacePlace, root), reveal };
+  return { place: segments.reduce<SpacePlace>((place, name) => childPlace(place, name) as SpacePlace, root), reveal };
 }
 
 export function spaceSegments(entry: SpaceNode | null) {
   const segments: string[] = [];
   for (let current = entry; current?.parent; current = current.parent) {
-    segments.push(current.name);
+    segments.push(current.driveId ?? current.name);
   }
   return segments.reverse();
 }
@@ -97,7 +111,7 @@ export function spaceSegments(entry: SpaceNode | null) {
 export function nearestSpaceNode(root: SpaceNode, segments: readonly string[]) {
   let current = root;
   for (const name of segments) {
-    const child = current.children.find((entry) => entry.name === name);
+    const child = current.children.find((entry) => (entry.driveId ?? entry.name) === name);
     if (!child) break;
     current = child;
   }
@@ -238,11 +252,74 @@ async function scanLocalSpace(
 
 
 function connectionLost(error: string) {
-  return /connect to the .* server first|could not reach the .* server|connection (?:closed|reset|refused|aborted|lost|error)|broken pipe|network is unreachable|timed out|unexpected eof|disconnected|error sending request/i.test(error);
+  return /connect to the .* server first|could not reach the .* server|could not reach Google Drive|connection (?:closed|reset|refused|aborted|lost|error)|broken pipe|network is unreachable|timed out|unexpected eof|disconnected|error sending request/i.test(error);
 }
 
 function bytes(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+async function scanGoogleDriveSpace(place: GoogleDrivePlace, signal: AbortSignal, report: (result: SpaceResult) => void) {
+  const result = initialSpaceResult(place);
+  const nodes = [result.root];
+  result.nodes = nodes;
+  const folder = place.folders.at(-1)?.id ?? "root";
+  const seen = new Set([folder]);
+  const pending = [{ folder, entry: result.root }];
+  report({ ...result });
+  while (pending.length && !signal.aborted) {
+    const job = pending.pop()!;
+    const parents: SpaceNode[] = [];
+    for (let entry: SpaceNode | null = job.entry; entry; entry = entry.parent) parents.push(entry);
+    try {
+      let pageToken: string | null = null;
+      const tokens = new Set<string>();
+      do {
+        const page = await api.googleDriveSpacePage(place.id, job.folder, pageToken, job.entry === result.root);
+        if (signal.aborted) return;
+        for (const file of page.items) {
+          if (seen.has(file.id)) continue;
+          seen.add(file.id);
+          const child = node(nodes.length, file.name, file.directory, job.entry);
+          child.driveId = file.id;
+          nodes.push(child);
+          job.entry.children.push(child);
+          if (child.directory) pending.push({ folder: file.id, entry: child });
+          else {
+            const size = bytes(file.quotaBytes);
+            child.logical = size ?? 0;
+            child.missingLogical = Number(size === null);
+          }
+          for (const parent of parents) {
+            parent.logical += child.logical;
+            parent.missingLogical += child.missingLogical;
+            parent.pending += child.pending;
+          }
+        }
+        if (page.partial) for (const parent of parents) parent.partial = true;
+        pageToken = page.nextPageToken;
+        if (pageToken) {
+          if (tokens.has(pageToken)) throw new Error("Google Drive returned the same page twice. Rescan to retry.");
+          tokens.add(pageToken);
+          report({ ...result });
+        }
+      } while (pageToken);
+    } catch (failure) {
+      if (signal.aborted) return;
+      job.entry.error = describeError(failure);
+      for (const parent of parents) parent.partial = true;
+      if (job.entry === result.root || connectionLost(job.entry.error) || job.entry.error === googleDriveSignInRequired) {
+        result.error = job.entry.error;
+        result.phase = nodes.length > 1 ? "partial" : "error";
+        break;
+      }
+    }
+    for (const parent of parents) parent.pending--;
+    if (pending.length) report({ ...result });
+  }
+  if (signal.aborted) return;
+  if (result.phase === "scanning") result.phase = result.root.partial ? "partial" : "complete";
+  report({ ...result });
 }
 
 export async function scanSpace(
@@ -252,6 +329,7 @@ export async function scanSpace(
   authorize?: (place: SshPlace, signal: AbortSignal) => Promise<Listing>,
 ) {
   if (rootPlace.kind === "local") return scanLocalSpace(rootPlace, signal, report);
+  if (rootPlace.kind === "googleDrive") return scanGoogleDriveSpace(rootPlace, signal, report);
   const result = initialSpaceResult(rootPlace);
   const nodes = [result.root];
   result.nodes = nodes;

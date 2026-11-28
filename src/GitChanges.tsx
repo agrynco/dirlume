@@ -7,6 +7,7 @@ import { Dialog } from "./Dialog";
 import { GitActionButtons, useGitMenu, type GitAction } from "./GitActions";
 import { bookmarkFile } from "./fileBookmarks";
 import { GitStashes } from "./GitStashes";
+import { ReadOnlyFileComparison, type ComparisonShortcuts } from "./TextTools";
 import { writeError, writeErrors, writeFailure } from "./gitWriteError";
 import { imageType } from "./ImageViewport";
 import { t } from "./i18n";
@@ -28,22 +29,24 @@ const fallbacks: Record<NonNullable<GitWorkingDiff["fallback"]>, string> = {
 const changeId = ({ group, path }: GitWorkingChange) => JSON.stringify([group, path]);
 const changeLabel = ({ path, previousPath }: GitWorkingChange) => previousPath ? previousPath + " → " + path : path;
 
-function Preview({ root, change, actions, fileActions, unavailable }: {
+function Preview({ root, change, actions, fileActions, unavailable, compareShortcuts }: {
   root: string;
   change: GitWorkingChange;
   actions?: GitAction[];
   fileActions?: (diff: GitWorkingDiff) => GitAction[];
   unavailable?: boolean;
+  compareShortcuts?: ComparisonShortcuts;
 }) {
   const menu = useGitMenu();
   const [diff, setDiff] = useState<GitWorkingDiff | null>(null);
   const [error, setError] = useState(false);
+  const includeVersions = !!compareShortcuts;
   useEffect(() => {
     let canceled = false;
-    void api.gitWorkingDiff(root, change).then((result) => { if (!canceled) setDiff(result); },
+    void api.gitWorkingDiff(root, change, includeVersions).then((result) => { if (!canceled) setDiff(result); },
       () => { if (!canceled) setError(true); });
     return () => { canceled = true; };
-  }, [root, change]);
+  }, [root, change, includeVersions]);
   const commands = [...(actions ?? []), ...(diff && fileActions ? fileActions(diff) : [])];
   const comparison = change.group === "staged" ? diff?.unborn ? "Empty tree → Index" : "HEAD → Index" :
     change.group === "unstaged" ? "Index → Working file" : "New working file";
@@ -58,13 +61,32 @@ function Preview({ root, change, actions, fileActions, unavailable }: {
     </div>
     {error ? <p className="pane-empty git-error" role="alert">{t("Could not read this change.")}</p> :
       !diff ? <p className="pane-empty" role="status">{t("Reading change…")}</p> :
-      diff.fallback ? <p className="pane-empty">{t(fallbacks[diff.fallback])}</p> :
-      <pre className="git-patch" tabIndex={0} aria-label={t("Inline diff")} {...menu(commands, changeLabel(change))}><code>
-        {(diff.patch ?? "").match(/[^\n]*\n|[^\n]+$/g)?.map((line, index) =>
-          <span key={index} data-diff={line.startsWith("+") && !line.startsWith("+++") ? "added" :
-            line.startsWith("-") && !line.startsWith("---") ? "removed" : undefined}>{line}</span>)}
-      </code></pre>}
+      <WorkingFileComparison diff={diff} change={change} compareShortcuts={compareShortcuts} commands={commands} />}
   </>;
+}
+
+function WorkingFileComparison({ diff, change, compareShortcuts, commands = [] }: {
+  diff: GitWorkingDiff; change: GitWorkingChange; compareShortcuts?: ComparisonShortcuts; commands?: GitAction[];
+}) {
+  const menu = useGitMenu();
+  const { left: before, right: after } = diff.versions ?? {};
+  const contentFailure = [before, after].find((item) => item?.state === "binary" || item?.state === "oversized")?.state;
+  const unavailable = diff.fallback ?? (contentFailure === "binary" || contentFailure === "oversized" ? contentFailure : null);
+  if (unavailable) return <p className="pane-empty">{t(fallbacks[unavailable])}</p>;
+  if (compareShortcuts && before && after && (before.state !== "missing" || after.state !== "missing")) {
+    const beforeLabel = change.group === "staged" ? diff.unborn ? "Empty tree" : "HEAD" :
+      change.group === "unstaged" ? "Index" : "Empty tree";
+    const afterLabel = change.group === "staged" ? "Index" : "Working file";
+    const heading = (label: string, path: string) => <div className="git-file-version-heading"><strong>{t(label)}</strong><span>{path}</span></div>;
+    return <ReadOnlyFileComparison {...compareShortcuts} markIdentical={before.state === "available" && after.state === "available"}
+      left={{ text: before.state === "available" ? before.text : "", heading: heading(beforeLabel, change.previousPath ?? change.path) }}
+      right={{ text: after.state === "available" ? after.text : "", heading: heading(afterLabel, change.path) }} />;
+  }
+  return <pre className="git-patch" tabIndex={0} aria-label={t("Inline diff")} {...menu(commands, changeLabel(change))}><code>
+    {(diff.patch ?? "").match(/[^\n]*\n|[^\n]+$/g)?.map((line, index) =>
+      <span key={index} data-diff={line.startsWith("+") && !line.startsWith("+++") ? "added" :
+        line.startsWith("-") && !line.startsWith("---") ? "removed" : undefined}>{line}</span>)}
+  </code></pre>;
 }
 
 function BulkSelection({ root, index, onClose, onRefresh }: {
@@ -130,7 +152,7 @@ function BulkSelection({ root, index, onClose, onRefresh }: {
 }
 
 export function GitChanges({ side, root, refresh, selected, onSelect, header, paneActions, repository, onOpen, canEdit, onRefresh,
-  draft, onDraft }: {
+  draft, onDraft, pathScope, compareShortcuts }: {
   side: Side;
   root: string;
   refresh: number;
@@ -144,6 +166,8 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, pa
   onRefresh: () => void;
   draft: string;
   onDraft: (message: string) => void;
+  pathScope?: string;
+  compareShortcuts: ComparisonShortcuts;
 }) {
   const menu = useGitMenu();
   const [filter, setFilter] = useState("");
@@ -161,6 +185,7 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, pa
   const writing = useRef(false);
   const refocus = useRef<string | null>(null);
   const list = useRef<HTMLDivElement>(null);
+  const focusedScope = useRef(false);
   const filterField = useRef<HTMLInputElement>(null);
   useEffect(() => {
     mounted.current = true;
@@ -179,10 +204,18 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, pa
   const branchName = index?.snapshot.headRef?.replace(/^refs\/heads\//, "");
   const groups = (Object.keys(groupLabels) as GitChangeGroup[]).map((group) => ({
     group, rows: (rows ?? []).filter((row) => row.group === group &&
+      (!pathScope || row.path === pathScope || row.previousPath === pathScope) &&
       changeLabel(row).toLocaleLowerCase().includes(filter.toLocaleLowerCase())),
   }));
   const visible = groups.flatMap(({ rows }) => rows);
   const change = visible.find((row) => changeId(row) === selected) ?? visible[0];
+  const hasScopedChange = !!pathScope && !!change;
+  useLayoutEffect(() => {
+    if (hasScopedChange && !focusedScope.current) {
+      focusedScope.current = true;
+      list.current?.querySelector<HTMLElement>("[role=option][tabindex='0']")?.focus();
+    }
+  }, [hasScopedChange]);
   const current = change ? changeId(change) : "";
   const isSubmodule = !!(change && index?.submodules.includes(change.path));
   const selectedReview = review?.changes.find((row) => changeId(row) === reviewPath);
@@ -311,7 +344,7 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, pa
     list.current?.querySelectorAll<HTMLElement>("[role=option]")[Math.max(0, Math.min(next, visible.length - 1))]?.focus();
   }
   function changeCommands(target: GitWorkingChange): GitAction[] {
-    if (!index || index.submodules.includes(target.path)) return [];
+    if (pathScope || !index || index.submodules.includes(target.path)) return [];
     const { snapshot } = index;
     const disabled = !!pending || index.writeBlocked;
     const unstaging = target.group === "staged";
@@ -333,6 +366,7 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, pa
     return commands;
   }
   function documentCommands(target: GitWorkingChange, preview?: GitWorkingDiff): GitAction[] {
+    if (pathScope) return [];
     const file = preview?.workingPath ? bookmarkFile(preview.workingPath) : null;
     if (target.status === "D" || index?.submodules.includes(target.path) ||
         preview && (!file || !preview.workingText && !imageType(file.name))) return [];
@@ -355,7 +389,7 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, pa
       },
     }));
   }
-  const indexActions: GitAction[] = index ? [
+  const indexActions: GitAction[] = index && !pathScope ? [
     { label: "Commit…", icon: GitCommitHorizontal, disabled: !staged.length || !branchName || index.writeBlocked || !!pending,
       run: () => { setReview({ changes: staged, snapshot: index.snapshot }); setReviewPath(""); } },
     { label: "Amend…", icon: Pencil, disabled: !index.snapshot.head || !branchName || index.writeBlocked || !!pending,
@@ -368,27 +402,29 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, pa
       tabIndex={-1} {...menu([...indexActions, ...paneActions])}>
       {header}
       {repository}
-      {index && <div className="git-index-summary">
+      {pathScope && <p className="git-file-feedback"><code>{pathScope}</code></p>}
+      {index && !pathScope && <div className="git-index-summary">
         <span title={branchName}>{branchName ? index.snapshot.head ? t("Branch {0}", branchName) :
           t("Branch {0} has no commits yet.", branchName) : t("Detached HEAD")}</span>
         <span>{t("Staged files: {0}", staged.length)}</span>
         <GitActionButtons actions={indexActions} />
       </div>}
-      {index?.writeBlocked && <p className="git-write-feedback">{t(writeErrors.operationInProgress)}</p>}
-      {index && !branchName && <p className="git-write-feedback">{t(writeErrors.detached)}</p>}
+      {index?.writeBlocked && !pathScope && <p className="git-write-feedback">{t(writeErrors.operationInProgress)}</p>}
+      {index && !branchName && !pathScope && <p className="git-write-feedback">{t(writeErrors.detached)}</p>}
       {feedback && <p className={"git-write-feedback" + (feedback.error ? " git-error" : "")}
         role={feedback.error ? "alert" : "status"}>{feedback.message}</p>}
       {pending && pending !== "commit" && <p className="git-write-feedback" role="status">
         {t(pending === "review" ? "Working with Git…" : pending === "stage" ? "Staging…" : "Unstaging…")}</p>}
-      <input className="git-filter" ref={filterField} type="search" value={filter} aria-label={t("Filter changed paths")}
+      {!pathScope && <input className="git-filter" ref={filterField} type="search" value={filter} aria-label={t("Filter changed paths")}
         placeholder={t("Filter changed paths")} onChange={(event) => setFilter(event.target.value)}
         onKeyDown={(event) => {
           if (event.key !== "ArrowDown" || !change) return;
           event.preventDefault();
           list.current?.querySelector<HTMLElement>("[role=option][tabindex='0']")?.focus();
-        }} />
+        }} />}
       {rows === undefined ? <p className="pane-empty" role="status">{t("Reading working tree…")}</p> :
         rows === null ? <p className="pane-empty git-error" role="alert">{t("Could not read working tree changes.")}</p> :
+        pathScope && !visible.length ? <p className="pane-empty">{t("No changes for this file.")}</p> :
         !rows.length ? <p className="pane-empty">{t("Working tree is clean.")}</p> :
         !visible.length ? <p className="pane-empty">{t("No matching changed paths.")}</p> :
         <div className="git-scroll" ref={list} role="listbox" aria-label={t("Changed paths")} onKeyDown={handleKeys}>
@@ -416,7 +452,8 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, pa
       ])}>
       <header className="pane-heading"><span className="pane-title"><FileDiff aria-hidden="true" />{t("Change preview")}</span></header>
       {change && index && <Preview key={JSON.stringify([root, refresh, current])} root={root} change={change}
-        unavailable={isSubmodule} actions={changeCommands(change)} fileActions={(diff) => documentCommands(change, diff)} />}
+        unavailable={isSubmodule} actions={changeCommands(change)} fileActions={(diff) => documentCommands(change, diff)}
+        compareShortcuts={isSubmodule ? undefined : compareShortcuts} />}
     </section>
     {replacement && <Dialog title={t("Replace staged changes?")} helpTopic="gitView" onClose={() => setReplacement(undefined)}
       footer={<>
@@ -443,7 +480,7 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, pa
           disabled={!!pending} onClick={() => setReviewPath(changeId(row))}>{changeLabel(row)}</Button></li>)}
       </ul>
       {selectedReview && <div className="git-commit-diff">
-        <Preview key={reviewPath} root={root} change={selectedReview} />
+        <Preview key={reviewPath} root={root} change={selectedReview} compareShortcuts={compareShortcuts} />
       </div>}
       <label className="field">{t("Commit message")}
         <textarea data-initial-focus value={commitMessage} rows={4} disabled={!!pending} onChange={(event) => {
@@ -453,7 +490,7 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, pa
       </label>
     </Dialog>}
     {bulk && <BulkSelection root={root} index={index ?? bulk} onClose={() => setBulk(undefined)} onRefresh={onRefresh} />}
-    {stash && <GitStashes root={root} index={index} refresh={refresh} onClose={() => setStash(false)} onRefresh={onRefresh} />}
+    {stash && <GitStashes root={root} index={index} refresh={refresh} onClose={() => setStash(false)} onRefresh={onRefresh} shortcuts={compareShortcuts} />}
     {patchReview && <Dialog title={t(patchReview.kind === "discard" ? "Discard working change" : "Review text hunks")}
       helpTopic="gitView" wide onClose={() => setPatchReview(undefined)} footer={<>
         <Button onClick={() => setPatchReview(undefined)}>{t("Cancel")}</Button>
@@ -464,8 +501,7 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, pa
       {patchReview.kind === "discard" ? <>
         <p>{t(patchReview.plan.review.change.group === "untracked" ?
           "Remove this untracked file from the working tree." : "Restore the working file from the index. Staged changes are preserved.")}</p>
-        {patchReview.plan.diff.fallback ? <p>{t(fallbacks[patchReview.plan.diff.fallback])}</p> :
-          <pre className="git-patch" tabIndex={0} aria-label={t("Inline diff")}>{patchReview.plan.diff.patch}</pre>}
+        <WorkingFileComparison diff={patchReview.plan.diff} change={patchReview.plan.review.change} compareShortcuts={compareShortcuts} />
       </> : <>
         <label className="field">{t("Hunk")}
           <select value={hunk} onChange={(event) => setHunk(Number(event.target.value))}>

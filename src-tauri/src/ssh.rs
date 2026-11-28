@@ -1,4 +1,5 @@
 mod compatibility;
+mod git_read;
 pub(crate) mod profiles;
 mod session;
 mod standard_rename;
@@ -40,6 +41,7 @@ use crate::{
     protocol::{file_server_origin, RemoteListing},
 };
 use compatibility::Compatibility;
+pub(crate) use git_read::GitOutput;
 use profiles::{
     Authentication, Config, ConnectionSettings, DraftHost, Endpoint, HostKey, ProfileInput,
     SavedHost, SavedProfile,
@@ -423,6 +425,15 @@ impl Connection {
             .map_err(message)?
             .completion_client();
         terminal::complete(&client, script).await
+    }
+
+    pub(crate) fn git_read(&self, script: &str, limit: usize) -> Result<GitOutput> {
+        let client = self
+            .listing
+            .try_lock()
+            .map_err(message)?
+            .completion_client();
+        tauri::async_runtime::block_on(git_read::read(&client, script, limit))
     }
 
     fn authenticated_client(&self) -> Result<AuthenticatedRoute> {

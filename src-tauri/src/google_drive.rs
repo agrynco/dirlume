@@ -4,8 +4,8 @@ use std::{
     future::IntoFuture,
     io::{self, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-    time::Duration,
+    sync::{Arc, Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 use axum::{extract::Query, http::StatusCode, routing::get, Router};
@@ -45,6 +45,13 @@ const FOLDER: &str = "application/vnd.google-apps.folder";
 pub(crate) struct DriveState {
     profiles: Mutex<()>,
     sign_ins: Arc<Mutex<HashMap<Uuid, CancellationToken>>>,
+    storage_access: Mutex<HashMap<Uuid, StorageAccess>>,
+}
+
+struct StorageAccess {
+    credential: digest::Digest,
+    expires: Instant,
+    token: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -185,6 +192,7 @@ pub(crate) fn remove_google_drive(
         .cloned()
         .collect::<Vec<_>>();
     let entry = credential(id)?;
+    state.storage_access.lock().map_err(message)?.remove(&id);
     save_profiles(&app, &remaining)?;
     match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
@@ -322,6 +330,7 @@ struct Tokens {
     access_token: String,
     refresh_token: Option<String>,
     scope: Option<String>,
+    expires_in: Option<u64>,
 }
 
 async fn tokens(
@@ -474,6 +483,53 @@ async fn access(app: &AppHandle, client: &Client, id: Uuid) -> Result<String> {
     access_with_scope(app, client, id, None).await
 }
 
+fn storage_http() -> Result<&'static Client> {
+    static CLIENT: OnceLock<Result<Client>> = OnceLock::new();
+    CLIENT.get_or_init(http).as_ref().map_err(Clone::clone)
+}
+
+async fn storage_access(app: &AppHandle, client: &Client, id: Uuid) -> Result<String> {
+    let state = app.state::<DriveState>();
+    let entry = credential(id)?;
+    let (refresh, _) = saved_access(app, &state, id, &entry)?;
+    let credential = digest::digest(&digest::SHA256, refresh.as_bytes());
+    let now = Instant::now();
+    {
+        let mut cached = state.storage_access.lock().map_err(message)?;
+        cached.retain(|_, token| token.expires > now);
+        if let Some(token) = cached
+            .get(&id)
+            .filter(|token| token.credential.as_ref() == credential.as_ref())
+        {
+            return Ok(token.token.clone());
+        }
+    }
+    let tokens = refresh_access(app, &state, client, &entry, &refresh).await?;
+    let seconds = tokens.expires_in.unwrap_or(0).saturating_sub(30).min(300);
+    if seconds > 0 {
+        state.storage_access.lock().map_err(message)?.insert(
+            id,
+            StorageAccess {
+                expires: now + Duration::from_secs(seconds),
+                credential,
+                token: tokens.access_token.clone(),
+            },
+        );
+    }
+    Ok(tokens.access_token)
+}
+
+fn storage_result<T>(app: &AppHandle, id: Uuid, result: Result<T>) -> Result<T> {
+    if result.as_ref().err().is_some_and(|error| error == SIGN_IN) {
+        app.state::<DriveState>()
+            .storage_access
+            .lock()
+            .map_err(message)?
+            .remove(&id);
+    }
+    result
+}
+
 async fn access_with_scope(
     app: &AppHandle,
     client: &Client,
@@ -482,44 +538,56 @@ async fn access_with_scope(
 ) -> Result<String> {
     let state = app.state::<DriveState>();
     let entry = credential(id)?;
-    let (refresh, can_write) = {
-        let _guard = state.profiles.lock().map_err(message)?;
-        let profile = profiles(app)?
-            .into_iter()
-            .find(|profile| profile.id == id)
-            .ok_or("The Google Drive connection no longer exists.")?;
-        (read_credential(&entry)?.ok_or(SIGN_IN)?, profile.can_write)
-    };
+    let (refresh, can_write) = saved_access(app, &state, id, &entry)?;
+    let tokens = refresh_access(app, &state, client, &entry, &refresh).await?;
+    if required.is_some_and(|required| {
+        !tokens
+            .scope
+            .as_deref()
+            .map_or(required == WRITE_SCOPE && can_write, |scope| {
+                scope.split_whitespace().any(|granted| granted == required)
+            })
+    }) {
+        return Err(WRITE_SIGN_IN.into());
+    }
+    Ok(tokens.access_token)
+}
+
+fn saved_access(
+    app: &AppHandle,
+    state: &DriveState,
+    id: Uuid,
+    entry: &keyring::Entry,
+) -> Result<(String, bool)> {
+    let _guard = state.profiles.lock().map_err(message)?;
+    let profile = profiles(app)?
+        .into_iter()
+        .find(|profile| profile.id == id)
+        .ok_or("The Google Drive connection no longer exists.")?;
+    Ok((read_credential(entry)?.ok_or(SIGN_IN)?, profile.can_write))
+}
+
+async fn refresh_access(
+    app: &AppHandle,
+    state: &DriveState,
+    client: &Client,
+    entry: &keyring::Entry,
+    refresh: &str,
+) -> Result<Tokens> {
     let config = client_config(app)?;
-    match tokens(
+    let result = tokens(
         client,
         &config,
-        &[("grant_type", "refresh_token"), ("refresh_token", &refresh)],
+        &[("grant_type", "refresh_token"), ("refresh_token", refresh)],
     )
-    .await
-    {
-        Ok(tokens) => {
-            if required.is_some_and(|required| {
-                !tokens
-                    .scope
-                    .as_deref()
-                    .map_or(required == WRITE_SCOPE && can_write, |scope| {
-                        scope.split_whitespace().any(|granted| granted == required)
-                    })
-            }) {
-                return Err(WRITE_SIGN_IN.into());
-            }
-            Ok(tokens.access_token)
+    .await;
+    if result.as_ref().err().is_some_and(|error| error == SIGN_IN) {
+        let _guard = state.profiles.lock().map_err(message)?;
+        if read_credential(entry)?.as_deref() == Some(refresh) {
+            let _ = entry.delete_credential();
         }
-        Err(error) if error == SIGN_IN => {
-            let _guard = state.profiles.lock().map_err(message)?;
-            if read_credential(&entry)?.as_deref() == Some(&refresh) {
-                let _ = entry.delete_credential();
-            }
-            Err(error)
-        }
-        Err(error) => Err(error),
     }
+    result
 }
 
 async fn checked(request: reqwest::RequestBuilder, download: bool) -> Result<Response> {
@@ -638,6 +706,172 @@ fn valid_id(id: &str) -> Result<()> {
     }
 }
 
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DriveQuota {
+    limit: Option<u64>,
+    usage: Option<u64>,
+    usage_in_drive: Option<u64>,
+    usage_in_drive_trash: Option<u64>,
+}
+
+async fn read_quota(client: &Client, api: &str, access: &str) -> Result<DriveQuota> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct StorageQuota {
+        limit: Option<String>,
+        usage: Option<String>,
+        usage_in_drive: Option<String>,
+        usage_in_drive_trash: Option<String>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct About {
+        storage_quota: Option<StorageQuota>,
+    }
+    let about: About = json(
+        client
+            .get(format!("{api}/about"))
+            .bearer_auth(access)
+            .query(&[("fields", "storageQuota")]),
+    )
+    .await?;
+    Ok(about
+        .storage_quota
+        .map(|quota| DriveQuota {
+            limit: quota.limit.and_then(|value| value.parse().ok()),
+            usage: quota.usage.and_then(|value| value.parse().ok()),
+            usage_in_drive: quota.usage_in_drive.and_then(|value| value.parse().ok()),
+            usage_in_drive_trash: quota
+                .usage_in_drive_trash
+                .and_then(|value| value.parse().ok()),
+        })
+        .unwrap_or_default())
+}
+
+#[tauri::command]
+pub(crate) async fn google_drive_quota(app: AppHandle, id: Uuid) -> Result<DriveQuota> {
+    let client = storage_http()?;
+    let token = storage_access(&app, client, id).await?;
+    storage_result(&app, id, read_quota(client, API, &token).await)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DriveSpaceItem {
+    id: String,
+    name: String,
+    directory: bool,
+    quota_bytes: Option<u64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DriveSpacePage {
+    items: Vec<DriveSpaceItem>,
+    next_page_token: Option<String>,
+    partial: bool,
+}
+
+async fn read_space_page(
+    client: &Client,
+    api: &str,
+    access: &str,
+    folder: &str,
+    page_token: Option<&str>,
+    validate_folder: bool,
+) -> Result<DriveSpacePage> {
+    valid_id(folder)?;
+    if validate_folder && folder != "root" && page_token.is_none() {
+        check_folder(client, api, access, folder).await?;
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Item {
+        id: String,
+        name: String,
+        mime_type: String,
+        owned_by_me: Option<bool>,
+        quota_bytes_used: Option<String>,
+        #[serde(default)]
+        trashed: bool,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Page {
+        next_page_token: Option<String>,
+        #[serde(default)]
+        files: Vec<Item>,
+        #[serde(default)]
+        incomplete_search: bool,
+    }
+    let query = format!("'{folder}' in parents and trashed = false");
+    let mut request = client.get(format!("{api}/files")).bearer_auth(access).query(&[
+        ("q", query.as_str()),
+        ("fields", "nextPageToken,incompleteSearch,files(id,name,mimeType,ownedByMe,quotaBytesUsed,trashed)"),
+        ("pageSize", "1000"),
+        ("corpora", "user"),
+        ("spaces", "drive"),
+    ]);
+    if let Some(page_token) = page_token {
+        request = request.query(&[("pageToken", page_token)]);
+    }
+    let page: Page = json(request).await?;
+    Ok(DriveSpacePage {
+        items: page
+            .files
+            .into_iter()
+            .filter(|item| !item.trashed)
+            .map(|item| DriveSpaceItem {
+                id: item.id,
+                name: item.name,
+                directory: item.mime_type == FOLDER,
+                quota_bytes: match item.owned_by_me {
+                    Some(false) => Some(0),
+                    Some(true) => item.quota_bytes_used.and_then(|value| value.parse().ok()),
+                    None => None,
+                },
+            })
+            .collect(),
+        next_page_token: page.next_page_token,
+        partial: page.incomplete_search,
+    })
+}
+
+#[tauri::command]
+pub(crate) async fn google_drive_space_page(
+    app: AppHandle,
+    id: Uuid,
+    folder: String,
+    page_token: Option<String>,
+    validate_folder: bool,
+) -> Result<DriveSpacePage> {
+    let client = storage_http()?;
+    let token = storage_access(&app, client, id).await?;
+    let result = read_space_page(
+        client,
+        API,
+        &token,
+        &folder,
+        page_token.as_deref(),
+        validate_folder,
+    )
+    .await;
+    storage_result(&app, id, result)
+}
+
+async fn check_folder(client: &Client, api: &str, access: &str, folder: &str) -> Result<()> {
+    checked(
+        client
+            .get(format!("{api}/files/{folder}"))
+            .bearer_auth(access)
+            .query(&[("fields", "id")]),
+        false,
+    )
+    .await?;
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) async fn list_google_drive(
     app: AppHandle,
@@ -648,14 +882,7 @@ pub(crate) async fn list_google_drive(
     let client = http()?;
     let access = access(&app, &client, id).await?;
     if folder != "root" {
-        checked(
-            client
-                .get(format!("{API}/files/{folder}"))
-                .bearer_auth(&access)
-                .query(&[("fields", "id")]),
-            false,
-        )
-        .await?;
+        check_folder(&client, API, &access, &folder).await?;
     }
     list_items(&client, API, &access, &folder, true).await
 }
@@ -1465,6 +1692,73 @@ pub(crate) async fn download(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn reads_storage_quota_and_pages_without_following_shortcut_targets() {
+        use axum::{http::Uri, Json};
+        use serde_json::json;
+
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let router = Router::new()
+            .route("/about", get(|uri: Uri| async move {
+                assert_eq!(uri.query(), Some("fields=storageQuota"));
+                Json(json!({"storageQuota": {"usage": "100000", "usageInDrive": "2000", "usageInDriveTrash": "0"}}))
+            }))
+            .route("/files", get(|uri: Uri| async move {
+                let query = uri.query().unwrap();
+                assert!(query.contains("quotaBytesUsed"));
+                assert!(query.contains("trashed+%3D+false"));
+                if query.contains("pageToken=next") {
+                    Json(json!({"incompleteSearch": true, "files": [
+                        {"id":"missing","name":"Unknown","mimeType":"text/plain","ownedByMe":true},
+                        {"id":"zero","name":"Empty","mimeType":"text/plain","ownedByMe":true,"quotaBytesUsed":"0"},
+                        {"id":"trash","name":"Trashed","mimeType":"text/plain","ownedByMe":true,"quotaBytesUsed":"500","trashed":true}
+                    ]}))
+                } else {
+                    Json(json!({"nextPageToken":"next", "files": [
+                        {"id":"folder","name":"Folder","mimeType":FOLDER,"ownedByMe":true},
+                        {"id":"native","name":"Native document","mimeType":"application/vnd.google-apps.document","ownedByMe":true,"quotaBytesUsed":"91"},
+                        {"id":"shared","name":"Shared","mimeType":"text/plain","ownedByMe":false,"quotaBytesUsed":"999"},
+                        {"id":"link","name":"Link","mimeType":"application/vnd.google-apps.shortcut","ownedByMe":true,"quotaBytesUsed":"0","shortcutDetails":{"targetId":"folder"}}
+                    ]}))
+                }
+            }));
+        let service = tokio::spawn(axum::serve(listener, router).into_future());
+        let client = http().unwrap();
+        let quota = read_quota(&client, &origin, "test-token").await.unwrap();
+        assert_eq!(quota.limit, None);
+        assert_eq!(quota.usage, Some(100000));
+        assert_eq!(quota.usage_in_drive, Some(2000));
+        assert_eq!(quota.usage_in_drive_trash, Some(0));
+
+        let first = read_space_page(&client, &origin, "test-token", "root", None, true)
+            .await
+            .unwrap();
+        assert!(!first.partial);
+        assert!(first.items[0].directory);
+        assert_eq!(first.items[1].quota_bytes, Some(91));
+        assert_eq!(first.items[2].quota_bytes, Some(0));
+        assert!(!first.items[3].directory);
+        let next = read_space_page(
+            &client,
+            &origin,
+            "test-token",
+            "root",
+            first.next_page_token.as_deref(),
+            true,
+        )
+        .await
+        .unwrap();
+        assert!(next.partial);
+        assert!(next.next_page_token.is_none());
+        assert_eq!(next.items.len(), 2);
+        assert_eq!(next.items[0].quota_bytes, None);
+        assert_eq!(next.items[1].quota_bytes, Some(0));
+        service.abort();
+    }
 
     #[tokio::test]
     async fn drive_text_saves_twice_without_etag_and_rejects_external_edits() {

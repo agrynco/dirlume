@@ -1,7 +1,7 @@
 import { countText, errorText, locale, t } from "./i18n";
 import { Message } from "./Message";
 import { Button } from "./Button";
-import { lazy, Suspense, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bookmark, Copy, Search, Settings2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
@@ -22,7 +22,8 @@ import { bindingMatches, eventShortcut, showShortcut, type Bindings, type Comman
 import { isLightTheme, type BaseTheme, type Palette } from "./appearance";
 import { viewFontStyle, type ViewFontSizes } from "./viewFonts";
 import { normalized, preferredLineEnding, restoreLineEndings } from "./textFormat";
-import type { CompareRequest, DiffBlock, DiffLine, DiffResult } from "./compare.worker";
+import type { CompareRequest, DiffResult } from "./compare.worker";
+import { DiffRows } from "./DiffRows";
 import { SplitDivider } from "./SplitDivider";
 import { PathField } from "./PathField";
 
@@ -694,92 +695,48 @@ function saveCompareOption(key: string, value: string) {
   try { localStorage.setItem(key, value); } catch { /* Keep the setting for this dialog. */ }
 }
 
-function DiffText({ line }: { line: DiffLine | null }) {
-  if (!line?.text) return " ";
-  return line.fragments ? line.fragments.map(({ text, changed }, index) =>
-    changed ? <mark key={index}>{text}</mark> : text) : line.text;
-}
-
-function ChangeConnector({ block, ratio }: { block: DiffBlock; ratio: number }) {
-  const svg = useRef<SVGSVGElement>(null);
-  const lastRow = block.rows.length - 1;
-  const firstMissingLeft = block.rows.findIndex(({ left }) => left === null);
-  const firstMissingRight = block.rows.findIndex(({ right }) => right === null);
-  const leftEnd = firstMissingLeft < 0 ? lastRow : firstMissingLeft - 1;
-  const rightEnd = firstMissingRight < 0 ? lastRow : firstMissingRight - 1;
-  const [ends, setEnds] = useState([leftEnd < 0 ? 0 : 100, rightEnd < 0 ? 0 : 100]);
-
-  useLayoutEffect(() => {
-    const group = svg.current?.closest(".diff-block");
-    const shorter = Math.min(leftEnd, rightEnd);
-    if (!group || shorter < 0 || shorter === lastRow) return;
-    const row = group.children[shorter];
-    const measure = () => {
-      const region = group.getBoundingClientRect();
-      const bottom = (row.getBoundingClientRect().bottom - region.top) / region.height * 100;
-      if (Number.isFinite(bottom)) setEnds(leftEnd < rightEnd ? [bottom, 100] : [100, bottom]);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(group);
-    observer.observe(row);
-    return () => observer.disconnect();
-  }, [leftEnd, rightEnd, lastRow, ratio]);
-
-  const [a, b] = ends;
-  return <div className="diff-connector" aria-hidden="true">
-    <svg ref={svg} viewBox="0 0 24 100" preserveAspectRatio="none">
-      <path data-ends={ends.join(",")} className={leftEnd < 0 ? "added" : rightEnd < 0 ? "removed" : "changed"}
-        d={`M0 0 H24 V${b} C14 ${b} 10 ${a} 0 ${a} Z`} />
-    </svg>
-  </div>;
-}
-
-function DiffRows({ block, current, split, connectors, ratio }: {
-  block: DiffBlock;
-  current: number;
-  split: boolean;
-  connectors: boolean;
-  ratio: number;
-}) {
-  const changed = block.group !== null;
-  const unified = (left: DiffLine | null, right: DiffLine | null, kind: string) =>
-    <div key={`${left?.number ?? ""}:${right?.number ?? ""}`} className={`diff-row diff-unified ${kind}`}>
-      <span className="diff-number">{left?.number}</span>
-      <span className="diff-number">{right?.number}</span>
-      <span className="diff-sign" aria-hidden="true">{kind === "added" ? "+" : kind === "removed" ? "−" : ""}</span>
-      <span className="diff-text"><DiffText line={right ?? left} /></span>
-    </div>;
-  const half = (line: DiffLine | null, side: "left" | "right") =>
-    <div className={`diff-half ${changed && line ? side === "left" ? "removed" : "added" : ""}`} data-diff-side={side}>
-      <span className="diff-number">{line?.number}</span>
-      <span className="diff-text"><DiffText line={line} /></span>
-    </div>;
-  return <div className={`diff-block${changed && block.group === current ? " current" : ""}`}
-    data-change={block.group ?? undefined}>
-    {split ? block.rows.map(({ left, right }) =>
-      <div key={`${left?.number ?? ""}:${right?.number ?? ""}`} className="diff-row diff-split">
-        {half(left, "left")}{half(right, "right")}
-      </div>
-    ) : changed ? <>
-      {block.rows.flatMap(({ left }) => left ? unified(left, null, "removed") : [])}
-      {block.rows.flatMap(({ right }) => right ? unified(null, right, "added") : [])}
-    </> : block.rows.map(({ left, right }) => unified(left, right, "same"))}
-    {split && changed && connectors && <ChangeConnector block={block} ratio={ratio} />}
-  </div>;
-}
-
-export function CompareDialog({ left, right, previousShortcut, nextShortcut, swapShortcut, onClose, onDirtyChange, standalone = false }: {
-  left: NamedFile;
-  right: NamedFile;
+export type ComparisonShortcuts = {
   previousShortcut: readonly string[];
   nextShortcut: readonly string[];
   swapShortcut: readonly string[];
+};
+type CompareDialogProps = ComparisonShortcuts & {
+  left: NamedFile;
+  right: NamedFile;
   onClose: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   standalone?: boolean;
-}) {
-  const [documents, setDocuments] = useState<Record<CompareSide, string> | null>(null);
+};
+type ReadOnlyComparisonProps = ComparisonShortcuts & {
+  left: { text: string; heading: ReactNode };
+  right: { text: string; heading: ReactNode };
+  markIdentical?: boolean;
+};
+
+export function CompareDialog({ left, right, ...props }: CompareDialogProps) {
+  return <FileComparison {...props} files={{ left, right }} />;
+}
+
+export function ReadOnlyFileComparison({ previousShortcut, nextShortcut, swapShortcut, ...text }: ReadOnlyComparisonProps) {
+  return <FileComparison previousShortcut={previousShortcut} nextShortcut={nextShortcut} swapShortcut={swapShortcut} readOnly={text} />;
+}
+
+function FileComparison({ files, readOnly, previousShortcut, nextShortcut, swapShortcut, onClose, onDirtyChange, standalone = false }:
+  ComparisonShortcuts & {
+    files?: Pick<CompareDialogProps, "left" | "right">;
+    readOnly?: Omit<ReadOnlyComparisonProps, keyof ComparisonShortcuts>;
+    onClose?: () => void;
+    onDirtyChange?: (dirty: boolean) => void;
+    standalone?: boolean;
+  }) {
+  const [editableDocuments, setDocuments] = useState<Record<CompareSide, string> | null>(null);
+  const leftText = readOnly?.left.text;
+  const rightText = readOnly?.right.text;
+  const inputText = useMemo(() => leftText === undefined || rightText === undefined ? null :
+    { left: normalized(leftText), right: normalized(rightText) }, [leftText, rightText]);
+  const documents = readOnly ? inputText : editableDocuments;
+  const left = files?.left;
+  const right = files?.right;
   const [originals, setOriginals] = useState<Record<CompareSide, TextDocument> | null>(null);
   const [error, setError] = useState("");
   const [whitespace, setWhitespace] = useState(false);
@@ -803,7 +760,6 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
   const result = comparison?.documents === documents && comparison.whitespace === whitespace ? comparison.result : null;
   const computed = result && "blocks" in result ? result : null;
   const groups = computed?.groups ?? 0;
-  const files = { left, right };
   const order = swapped ? ["right", "left"] as const : compareSides;
   const [leftFile, rightFile] = order;
   const dirty = order.filter((side) => originals && documents && normalized(originals[side].text) !== documents[side]);
@@ -816,19 +772,20 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
   useEffect(() => { reportDirty.current?.(hasChanges); }, [hasChanges]);
 
   useEffect(() => {
+    if (!left || !right) return;
     let cancelled = false;
     setError("");
     setDocuments(null);
     setOriginals(null);
     setCurrent(0);
     Promise.all([readPlaceText(left, undefined, "compare"), readPlaceText(right, undefined, "compare")])
-      .then(([left, right]) => {
+      .then(([leftDocument, rightDocument]) => {
         if (cancelled) return;
-        setOriginals({ left, right });
-        setDocuments({ left: normalized(left.text), right: normalized(right.text) });
+        setOriginals({ left: leftDocument, right: rightDocument });
+        setDocuments({ left: normalized(leftDocument.text), right: normalized(rightDocument.text) });
         setDestinations({
-          left: writableTextPlace(files.left.place) ? null : "",
-          right: writableTextPlace(files.right.place) ? null : "",
+          left: writableTextPlace(left.place) ? null : "",
+          right: writableTextPlace(right.place) ? null : "",
         });
       },
         (error: unknown) => { if (!cancelled) setError(describeError(error)); });
@@ -838,7 +795,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
   function requestClose() {
     if (writing.current) return;
     if (dirty.length) { setSaveError(""); setConfirm(true); }
-    else onClose();
+    else onClose?.();
   }
 
   const closeRequest = useRef(requestClose);
@@ -853,7 +810,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
   }, [standalone]);
 
   async function saveAndClose() {
-    if (!documents || !originals || writing.current) return;
+    if (!files || !documents || !originals || writing.current) return;
     writing.current = true;
     setSaving(true);
     setSaveError("");
@@ -870,7 +827,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
         }
         setOriginals((previous) => previous && { ...previous, [side]: saved });
       }
-      onClose();
+      onClose?.();
     } catch (failure) {
       setSaveError(describeError(failure));
     } finally {
@@ -931,6 +888,17 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
     if (current) output.current?.querySelector(`[data-change="${current}"]`)?.scrollIntoView({ block: "start", inline: "nearest" });
   }, [current, layout]);
 
+  useLayoutEffect(() => {
+    const view = output.current;
+    const heading = view?.firstElementChild;
+    if (!readOnly || !view || !heading) return;
+    const update = () => view.style.setProperty("--comparison-header-block-size", `${heading.getBoundingClientRect().height}px`);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(heading);
+    return () => observer.disconnect();
+  }, [readOnly, computed]);
+
   const split = layout === "side-by-side";
   const columns = { "--comparison-columns": `minmax(0, ${ratio}fr) var(--comparison-gutter) minmax(0, ${100 - ratio}fr)` } as CSSProperties;
   const failure = error || (result && "error" in result ? result.error : "");
@@ -938,27 +906,27 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
     { label: t("Apply to left"), disabled: !activeGroup?.ranges, run: () => merge(rightFile, leftFile) },
     { label: t("Apply to right"), disabled: !activeGroup?.ranges, run: () => merge(leftFile, rightFile) },
   ];
-  return <>
-    <Dialog title={t("Compare files")} helpTopic="compare" fontZoom="compare" wide standalone={standalone} onClose={requestClose}
-      onKeyDownCapture={(event) => {
-        if (!split || saving || confirm || event.nativeEvent.isComposing || !bindingMatches(swapShortcut, eventShortcut(event))) return;
-        event.preventDefault();
-        event.stopPropagation();
-        if (event.repeat) return;
-        const focused = document.activeElement;
-        setSwapped((current) => !current);
-        if (focused instanceof HTMLElement && focused.closest(".comparison-editors")) {
-          requestAnimationFrame(() => { if (focused.isConnected) focused.focus({ preventScroll: true }); });
-        }
-      }}
-      onKeyDown={(event) => {
-        const shortcut = eventShortcut(event);
-        const previous = bindingMatches(previousShortcut, shortcut);
-        if (previous || bindingMatches(nextShortcut, shortcut)) {
-          event.preventDefault();
-          jump(previous ? -1 : 1);
-        }
-      }}>
+  function handleSwap(event: KeyboardEvent<HTMLElement>) {
+    if (!split || saving || confirm || event.nativeEvent.isComposing || !bindingMatches(swapShortcut, eventShortcut(event))) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.repeat) return;
+    const focused = document.activeElement;
+    setSwapped((current) => !current);
+    if (focused instanceof HTMLElement && focused.closest(".comparison-editors")) {
+      requestAnimationFrame(() => { if (focused.isConnected) focused.focus({ preventScroll: true }); });
+    }
+  }
+
+  function handleNavigation(event: KeyboardEvent<HTMLElement>) {
+    const shortcut = eventShortcut(event);
+    const previous = bindingMatches(previousShortcut, shortcut);
+    if (previous || bindingMatches(nextShortcut, shortcut)) {
+      event.preventDefault();
+      jump(previous ? -1 : 1);
+    }
+  }
+  const content = <>
       <div className="comparison-toolbar">
         <div className="dialog-action-group">
           <DialogIconButton label={t("Previous")} disabled={!groups} shortcut={showShortcut(previousShortcut[0])}
@@ -967,11 +935,11 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
             onClick={() => jump(1)}><ArrowDown /></DialogIconButton>
           <span>{current ? t("{0} / {1}", current, groups) : countText(groups, "change")}</span>
         </div>
-        <div className="comparison-apply-inline dialog-actions">
+        {files && <><div className="comparison-apply-inline dialog-actions">
           <Button type="button" disabled={applyActions[0].disabled} onClick={applyActions[0].run}><ArrowLeft aria-hidden="true" /> {applyActions[0].label}</Button>
           <Button type="button" disabled={applyActions[1].disabled} onClick={applyActions[1].run}>{applyActions[1].label} <ArrowRight aria-hidden="true" /></Button>
         </div>
-        <DialogDisclosure className="comparison-apply-menu" label={t("Apply")} actions={applyActions} />
+        <DialogDisclosure className="comparison-apply-menu" label={t("Apply")} actions={applyActions} /></>}
         <DialogDisclosure className="comparison-options" label={t("Options")}>
           <label className="comparison-layout">{t("Layout")}
             <select aria-label={t("Layout")} value={layout} onChange={(event) => {
@@ -983,10 +951,10 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
               <option value="side-by-side">{t("Side-by-side")}</option>
             </select>
           </label>
-          <label className="field-checkbox"><input type="checkbox" checked={editing} disabled={!documents} onChange={(event) => {
+          {files && <label className="field-checkbox"><input type="checkbox" checked={editing} disabled={!documents} onChange={(event) => {
             setInitialEditor(leftFile);
             setEditing(event.target.checked);
-          }} /><span>{t("Edit files")}</span></label>
+          }} /><span>{t("Edit files")}</span></label>}
           {split && <label className="field-checkbox"><input type="checkbox" checked={connectors} onChange={(event) => {
             setConnectors(event.target.checked);
             saveCompareOption(compareConnectorsKey, String(event.target.checked));
@@ -1002,7 +970,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
       {failure && <p className="dialog-error" role="alert">{errorText(failure)}</p>}
       {!documents && !failure && <div className="dialog-body">{t("Loading…")}</div>}
       {documents && !result && !failure && <div className="dialog-body" role="status">{t("Comparing…")}</div>}
-      {documents && <div className="comparison-editors" hidden={!editing}>
+      {documents && files && <div className="comparison-editors" hidden={!editing}>
         {order.map((side) => <section key={side} className="comparison-editor text-window" data-editing="true"
           aria-label={t(side === leftFile ? "Left file" : "Right file")}>
           <div className="comparison-editor-name" data-tooltip={documentPath(files[side])}>{files[side].name}{dirty.includes(side) ? " *" : ""}</div>
@@ -1018,11 +986,13 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
       {computed && !editing && (
         <div className="comparison" data-layout={layout} style={columns} ref={output} tabIndex={0} aria-label={t("File differences")}>
           <div className={`comparison-head${split ? " comparison-head-split" : ""}`}>
-            <span data-tooltip={files[leftFile].name}>{files[leftFile].name}</span>
+            {readOnly ? readOnly[leftFile].heading : <span data-tooltip={files?.[leftFile].name}>{files?.[leftFile].name}</span>}
             {split ? <SplitDivider label={t("Comparison divider")} className="comparison-divider" value={ratio} onResize={setRatio} />
               : <span aria-hidden="true">→</span>}
-            <span data-tooltip={files[rightFile].name}>{files[rightFile].name}</span>
+            {readOnly ? readOnly[rightFile].heading : <span data-tooltip={files?.[rightFile].name}>{files?.[rightFile].name}</span>}
           </div>
+          {readOnly?.markIdentical && !groups && inputText?.left === inputText?.right &&
+            <p className="dialog-body" role="status">{t("The file contents are identical.")}</p>}
           {displayedBlocks?.map((block, index) => collapse && block.group === null && block.rows.length > 6 && !expanded.includes(index)
             ? <Button key={index} type="button" className="diff-unchanged" onClick={() => setExpanded((items) => [...items, index])}>
               {t("Show {0} unchanged lines", block.rows.length)}
@@ -1030,8 +1000,17 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
             : <DiffRows key={`${index}:${swapped}`} block={block} current={current} split={split} connectors={connectors} ratio={ratio} />)}
         </div>
       )}
+  </>;
+  if (readOnly) return <div className="file-comparison-embedded" data-font-zoom="compare" data-help-topic="compare"
+    onKeyDown={handleNavigation} onKeyDownCapture={handleSwap}>
+    {content}
+  </div>;
+  return <>
+    <Dialog title={t("Compare files")} helpTopic="compare" fontZoom="compare" wide standalone={standalone} onClose={requestClose}
+      onKeyDownCapture={handleSwap} onKeyDown={handleNavigation}>
+      {content}
     </Dialog>
-    {confirm && <Dialog title={t("Unsaved changes")} tone="warning" onClose={() => { if (!saving) setConfirm(false); }}>
+    {files && confirm && <Dialog title={t("Unsaved changes")} tone="warning" onClose={() => { if (!saving) setConfirm(false); }}>
       <div className="dialog-body transfer-body">
         {dirty.map((side) => <fieldset className="comparison-save" key={side} disabled={saving}>
           <legend>{t(side === leftFile ? "Left file" : "Right file")} · {files[side].name}</legend>

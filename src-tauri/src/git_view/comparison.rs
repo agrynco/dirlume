@@ -57,32 +57,42 @@ pub(super) fn resolve_commit(git: &Path, root: &Path, revision: &str) -> Result<
 fn compare(git: &Path, root: &Path, base: &str, target: &str) -> Result<Comparison> {
     let base = resolve_commit(git, root, base)?;
     let target = resolve_commit(git, root, target)?;
-    let changes = bounded(
-        git,
-        root,
-        &[
-            "diff",
-            "--name-status",
-            "-z",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--no-relative",
-            "--find-renames",
-            "--ignore-submodules=none",
-            &base,
-            &target,
-            "--",
-        ],
-        STATUS_LIMIT,
-    )?
-    .ok_or(GitError::Unreadable)?;
+    let changes = changed_paths(git, root, Some(&base), &target)?;
     Ok(Comparison {
         base_only: unique_history(git, root, &base, &target, 0)?,
         target_only: unique_history(git, root, &target, &base, 0)?,
         base,
         target,
-        changes: parse_changes(&changes)?,
+        changes,
     })
+}
+
+pub(super) fn changed_paths(
+    git: &Path,
+    root: &Path,
+    base: Option<&str>,
+    target: &str,
+) -> Result<Vec<Change>> {
+    let mut args = if base.is_some() {
+        vec!["diff"]
+    } else {
+        vec!["diff-tree", "--root", "--no-commit-id", "-r"]
+    };
+    args.extend([
+        "--name-status",
+        "-z",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-relative",
+        "--find-renames",
+        "--ignore-submodules=none",
+    ]);
+    if let Some(base) = base {
+        args.push(oid(base)?);
+    }
+    args.extend([oid(target)?, "--"]);
+    let changes = bounded(git, root, &args, STATUS_LIMIT)?.ok_or(GitError::Unreadable)?;
+    parse_changes(&changes)
 }
 
 fn unique_history(
@@ -104,6 +114,7 @@ fn revision_diff(
     target: &str,
     path: &str,
     previous_path: Option<&str>,
+    reverse: bool,
 ) -> Result<RevisionDiff> {
     relative_file(path)?;
     let mut args = vec!["--literal-pathspecs"];
@@ -121,6 +132,9 @@ fn revision_diff(
         "--ignore-submodules=none",
         "--submodule=short",
     ]);
+    if reverse {
+        args.push("-R");
+    }
     if let Some(base) = base {
         args.push(oid(base)?);
     }
@@ -191,6 +205,7 @@ pub async fn git_revision_diff(
     target: String,
     path: String,
     previous_path: Option<String>,
+    reverse: Option<bool>,
 ) -> Result<RevisionDiff> {
     query(move || {
         revision_diff(
@@ -200,6 +215,7 @@ pub async fn git_revision_diff(
             &target,
             &path,
             previous_path.as_deref(),
+            reverse.unwrap_or(false),
         )
     })
     .await
@@ -246,25 +262,36 @@ mod tests {
         assert_eq!(result.changes[1].path, "topic.txt");
         assert_eq!(result.changes[1].status, 'A');
         assert!(
-            revision_diff(&git, root, Some(&base), &target, "topic.txt", None)
+            revision_diff(&git, root, Some(&base), &target, "topic.txt", None, false)
                 .unwrap()
                 .patch
                 .unwrap()
                 .contains("+topic")
         );
         assert!(
-            revision_diff(&git, root, None, &initial, "shared.txt", None)
+            revision_diff(&git, root, None, &initial, "shared.txt", None, false)
                 .unwrap()
                 .patch
                 .unwrap()
                 .contains("+shared")
         );
+        assert!(
+            revision_diff(&git, root, None, &initial, "shared.txt", None, true)
+                .unwrap()
+                .patch
+                .unwrap()
+                .contains("-shared")
+        );
+        assert!(
+            revision_diff(&git, root, Some(&base), &target, "topic.txt", None, true)
+                .unwrap()
+                .patch
+                .unwrap()
+                .contains("-topic")
+        );
         assert_eq!(run(&["status", "--porcelain"]), before);
         assert_eq!(run(&["rev-parse", "HEAD"]), base);
         let history = super::super::history_of(&git, root, &target, 0, Some("topic.txt")).unwrap();
         assert_eq!(history.commits[0].subject, "Topic");
-        let blamed = super::super::blame(&git, root, &target, "topic.txt").unwrap();
-        assert!(blamed.contains("Fixture Author"));
-        assert!(blamed.ends_with("topic\n"));
     }
 }
