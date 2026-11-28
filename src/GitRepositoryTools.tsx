@@ -16,7 +16,8 @@ const bisectLabels = { good: "Mark good", bad: "Mark bad", skip: "Skip revision"
 
 type Review = {
   title: string;
-  context: string[];
+  fields: { label: string; value: string }[];
+  destructive?: boolean;
   explanation?: string;
   apply: () => Promise<void>;
 };
@@ -117,7 +118,7 @@ export function GitRepositoryTools({ repository, refresh, onRefresh, onOpen, onT
   }
   function updateBisect(action: GitBisectAction, title: string) {
     if (!bisect) return;
-    setReview({ title, context: [bisect.head],
+    setReview({ title, fields: [{ label: "Revision under test", value: bisect.head }],
       explanation: action === "reset" ? "Restore the original checkout when Git ends the bisect." : undefined,
       apply: () => api.gitUpdateBisect(root, bisect, action) });
   }
@@ -146,14 +147,24 @@ export function GitRepositoryTools({ repository, refresh, onRefresh, onOpen, onT
             <Button disabled={pending || tree.path === root || tree.bare || tree.prunable}
               onClick={() => onOpen(tree.path)}>{t("Open worktree")}</Button>
             <Button disabled={pending || tree.path === root || tree.primary || tree.locked}
-              onClick={() => setReview({ title: "Remove worktree", context: [tree.path],
-                explanation: "Git checks for local changes before removing this worktree.",
+              onClick={() => setReview({ title: "Remove worktree", destructive: true,
+                fields: [
+                  { label: "Worktree folder to remove", value: tree.path },
+                  { label: "Checked-out revision", value: tree.branch?.replace(/^refs\/heads\//, "") ??
+                    (tree.head ? `${t("Detached HEAD")} · ${tree.head}` : t("Detached HEAD")) },
+                ],
+                explanation: "Git removes the worktree folder and keeps its branch. Local changes prevent removal.",
                 apply: () => api.gitRemoveWorktree(root, tree) })}>{t("Remove worktree")}</Button>
           </div>
         </li>)}</ul> : <p role="status">{t("Reading worktrees…")}</p>}
       {repository.head && <WorktreeForm repository={repository} pending={pending} onPrepare={(request) =>
-        setReview({ title: "Create linked worktree", context: [request.destination, request.revision,
-          request.expectedCommit, request.branch ?? t(request.detach ? "Detached HEAD" : "Existing local branch")],
+        setReview({ title: "Create linked worktree", fields: [
+          { label: "Worktree path", value: request.destination },
+          { label: "Starting revision", value: request.revision },
+          { label: "Starting commit", value: request.expectedCommit },
+          request.branch !== null ? { label: "Branch name", value: request.branch } :
+            { label: "Checkout mode", value: t(request.detach ? "Detached HEAD" : "Existing local branch") },
+        ],
         apply: () => api.gitCreateWorktree(root, request) })} />}
     </>}
     {tab === "submodules" && (submodules ? submodules.length ? <ul className="git-rebase-list">
@@ -161,7 +172,8 @@ export function GitRepositoryTools({ repository, refresh, onRefresh, onOpen, onT
         <p><code>{item.path}</code></p>
         <p>{t(submoduleStatus[item.status] ?? "Unknown")} · <code title={item.head}>{item.head.slice(0, 12)}</code></p>
         <Button disabled={pending || item.status === "U"} onClick={() => setReview({
-          title: item.status === "-" ? "Initialize submodule" : "Update submodule", context: [item.path],
+          title: item.status === "-" ? "Initialize submodule" : "Update submodule",
+          fields: [{ label: "Submodule path", value: item.path }],
           explanation: "Check out the recorded commit in this submodule and its nested submodules.",
           apply: () => api.gitUpdateSubmodule(root, item),
         })}>{t(item.status === "-" ? "Initialize submodule" : "Update submodule")}</Button>
@@ -178,7 +190,7 @@ export function GitRepositoryTools({ repository, refresh, onRefresh, onOpen, onT
           </label>
           <div className="git-branch-actions">
             {(Object.keys(lfsLabels) as GitLfsAction[]).map((action) => <Button disabled={pending || !remote} key={action}
-              onClick={() => setReview({ title: lfsLabels[action], context: [remote],
+              onClick={() => setReview({ title: lfsLabels[action], fields: [{ label: "Remote name", value: remote }],
                 apply: () => api.gitLfsTransfer(root, remote, action) })}>{t(lfsLabels[action])}</Button>)}
           </div>
         </> : <p>{t("No Git remotes are configured.")}</p>}
@@ -197,7 +209,10 @@ export function GitRepositoryTools({ repository, refresh, onRefresh, onOpen, onT
     </> : <form onSubmit={(event) => {
       event.preventDefault();
       const head = repository.head;
-      if (head && good.trim() && bad.trim()) setReview({ title: "Start bisect", context: [good.trim(), bad.trim()],
+      if (head && good.trim() && bad.trim()) setReview({ title: "Start bisect", fields: [
+        { label: "Known good commit", value: good.trim() },
+        { label: "Known bad commit", value: bad.trim() },
+      ],
         apply: () => api.gitStartBisect(root, repository.headRef, head, good.trim(), bad.trim()) });
     }}>
       <label className="field">{t("Known good commit")}<input list={revisions} value={good} disabled={pending}
@@ -207,12 +222,21 @@ export function GitRepositoryTools({ repository, refresh, onRefresh, onOpen, onT
       <datalist id={revisions}>{[...new Set(repository.branches.map(({ tip }) => tip))].map((hash) => <option key={hash} value={hash} />)}</datalist>
       <Button type="submit" disabled={pending || !repository.head || !good.trim() || !bad.trim()}>{t("Start bisect")}</Button>
     </form>)}
-    {review && <Dialog title={t(review.title)} helpTopic="gitView" onClose={pending ? undefined : () => setReview(undefined)}
-      footer={<><Button disabled={pending} onClick={() => setReview(undefined)}>{t("Cancel")}</Button>
-        <Button disabled={pending} onClick={() => void execute()}>{t(review.title)}</Button></>}>
-      <p><code>{root}</code></p>
-      {review.context.map((value, index) => <p key={index}><code>{value}</code></p>)}
-      {review.explanation && <p>{t(review.explanation)}</p>}
+    {review && <Dialog title={t(review.title)} helpTopic="gitView" tone={review.destructive ? "warning" : undefined}
+      onClose={pending ? undefined : () => setReview(undefined)}
+      footer={<><Button disabled={pending} data-initial-focus={review.destructive || undefined}
+        onClick={() => setReview(undefined)}>{t("Cancel")}</Button>
+        <Button disabled={pending} className={review.destructive ? "negative" : undefined}
+          onClick={() => void execute()}>{t(review.title)}</Button></>}>
+      <div className="dialog-body git-tools-review">
+        <dl>
+          {[...review.fields, { label: "Repository folder", value: root }].map(({ label, value }) => <div key={label}>
+            <dt>{t(label)}</dt>
+            <dd><code>{value}</code></dd>
+          </div>)}
+        </dl>
+        {review.explanation && <p>{t(review.explanation)}</p>}
+      </div>
     </Dialog>}
   </div>;
 }

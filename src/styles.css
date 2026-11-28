@@ -1387,6 +1387,14 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
   row-gap: var(--dialog-control-gap);
 }
 .dialog-body p { margin-block: 0; overflow-wrap: anywhere; }
+.git-tools-review, .git-tools-review dl { display: grid; gap: 12px; }
+.git-tools-review dl { margin: 0; overflow-wrap: anywhere; }
+.git-tools-review dt { color: var(--muted); font-weight: 600; }
+.git-tools-review dd { margin: 3px 0 0; }
+.dialog[data-tone="warning"] .git-tools-review dl > :first-child {
+  padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--raised);
+}
+.dialog[data-tone="warning"] .git-tools-review dl > :first-child dt { color: var(--ink); }
 .release-notes { display: grid; gap: 10px; overflow-wrap: anywhere; }
 .release-notes ul { margin: 0; padding-inline-start: 1.4em; }
 .release-notes li + li { margin-top: 4px; }

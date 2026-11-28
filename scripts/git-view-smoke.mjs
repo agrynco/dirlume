@@ -495,7 +495,8 @@ try {
   await history.getByText("Select a source branch to merge.", { exact: true }).waitFor();
   assert.deepEqual(await page.evaluate(() => window.gitFinishedOperation), { operation: "cherryPick", abort: true });
   await button(history, "Repository tools").click();
-  const worktreePath = await page.evaluate(() => /Windows/i.test(navigator.userAgent) ? "C:\\created repo" : "/created repo");
+  const worktreePath = await page.evaluate(() =>
+    (/Windows/i.test(navigator.userAgent) ? "C:\\created repo\\" : "/created repo/") + "long-worktree-name-".repeat(6) + "ł");
   const linkedPath = await page.evaluate(() => /Windows/i.test(navigator.userAgent) ? "C:\\linked repo ł" : "/linked repo ł");
   await history.getByRole("textbox", { name: "Worktree path", exact: true }).fill(worktreePath);
   await history.getByRole("textbox", { name: "Branch name", exact: true }).fill("created");
@@ -508,6 +509,21 @@ try {
   await button(createdTree, "Remove worktree").waitFor();
   assert.equal(await page.evaluate(() => window.gitCreatedWorktree.branch), "created");
   const removeTree = page.getByRole("dialog", { name: "Remove worktree", exact: true });
+  await page.setViewportSize({ width: 580, height: 460 });
+  await button(createdTree, "Remove worktree").click();
+  await removeTree.waitFor();
+  const reviewFields = removeTree.locator("dl > div");
+  assert.deepEqual(await reviewFields.locator("dt").allTextContents(),
+    ["Worktree folder to remove", "Checked-out revision", "Repository folder"]);
+  assert.equal(await reviewFields.first().locator("dd").textContent(), worktreePath);
+  assert.equal(await reviewFields.nth(1).locator("dd").textContent(), "created");
+  const reviewBody = removeTree.locator(".dialog-body");
+  assert.ok(await reviewBody.evaluate((body) => body.scrollWidth <= body.clientWidth));
+  assert.ok(await button(removeTree, "Cancel").evaluate((cancel) => cancel === document.activeElement));
+  await page.keyboard.press("Enter");
+  await removeTree.waitFor({ state: "hidden" });
+  assert.equal(await page.evaluate(() => window.gitRemovedWorktree), undefined);
+  await page.setViewportSize({ width: 1120, height: 760 });
   await page.evaluate(() => { window.gitWorktreeDirty = true; });
   await button(createdTree, "Remove worktree").click();
   await button(removeTree, "Remove worktree").click();
